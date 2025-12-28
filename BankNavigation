@@ -1,0 +1,124 @@
+-- ( LOCAL SCRIPT: BankNavigation - FIXED )
+-- Handles: Switching Frames, Click SFX, and Hover Dimming Effect.
+-- FIX: Removed code that forced BankFrame.Visible = true on load.
+
+local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService") 
+local TweenService = game:GetService("TweenService") -- Used for smooth dimming
+local player = Players.LocalPlayer
+local gui = script.Parent 
+
+-- 🔊 CONFIG
+local CLICK_SOUND_ID = "rbxassetid://9083627113" 
+local DIM_COLOR = Color3.new(0.7, 0.7, 0.7) -- The color when hovering (Darker)
+
+-- 1. FIND FRAMES
+local bankFrame = gui:FindFirstChild("BankFrame")
+local transferFrame = gui:FindFirstChild("TransferFrame")
+
+-- 2. FIND BUTTONS
+local openTransferBtn = nil
+local backBtn = nil
+
+if bankFrame then 
+	openTransferBtn = bankFrame:FindFirstChild("OpenTransferButton") 
+end
+
+if transferFrame then 
+	backBtn = transferFrame:FindFirstChild("BackButton") 
+end
+
+-- 3. FIND LABEL
+local balanceLabelV2 = nil
+if transferFrame then 
+	balanceLabelV2 = transferFrame:FindFirstChild("BalanceLabelv2") 
+end
+
+-- ============================================================================
+-- 🛠️ EFFECTS & AUDIO
+-- ============================================================================
+
+local function playClickSound()
+	local sound = Instance.new("Sound")
+	sound.SoundId = CLICK_SOUND_ID
+	sound.Volume = 0.5
+	sound.Parent = SoundService
+	sound:Play()
+	game.Debris:AddItem(sound, 1)
+end
+
+-- ✨ HOVER EFFECT FUNCTION
+local function setupHover(button)
+	if not button then return end
+
+	-- Store the original color so we can switch back
+	local originalColor = button.ImageColor3
+
+	button.MouseEnter:Connect(function()
+		-- Dim the button smoothly
+		TweenService:Create(button, TweenInfo.new(0.2), {ImageColor3 = DIM_COLOR}):Play()
+	end)
+
+	button.MouseLeave:Connect(function()
+		-- Return to normal
+		TweenService:Create(button, TweenInfo.new(0.2), {ImageColor3 = originalColor}):Play()
+	end)
+end
+
+local function updateBalance()
+	if balanceLabelV2 and player:FindFirstChild("leaderstats") then
+		local cash = player.leaderstats.Cash.Value
+		balanceLabelV2.Text = "$" .. cash
+	end
+end
+
+-- ============================================================================
+-- 🔄 NAVIGATION LOGIC
+-- ============================================================================
+
+local function openTransfer()
+	playClickSound()
+	print("🔄 Opening Transfer Menu...")
+
+	if bankFrame then bankFrame.Visible = false end
+	if transferFrame then transferFrame.Visible = true end
+
+	updateBalance() 
+end
+
+local function closeTransfer()
+	playClickSound()
+	print("🔙 Going Back...")
+
+	if transferFrame then transferFrame.Visible = false end
+	if bankFrame then bankFrame.Visible = true end
+end
+
+-- ⚡ CONNECTIONS
+
+-- Apply Hover Effects
+setupHover(openTransferBtn)
+setupHover(backBtn)
+
+-- Apply Click Logic
+if openTransferBtn then
+	openTransferBtn.MouseButton1Click:Connect(openTransfer)
+end
+
+if backBtn then
+	backBtn.MouseButton1Click:Connect(closeTransfer)
+end
+
+-- Live Balance Updates
+if player:WaitForChild("leaderstats", 5) then
+	player.leaderstats.Cash.Changed:Connect(updateBalance)
+end
+
+-- ============================================================================
+-- 🛑 FIXED STARTUP STATE
+-- ============================================================================
+-- We only force the Transfer frame to hide (so it's not overlapping).
+-- We DO NOT touch BankFrame, so it stays hidden until the main script opens it.
+
+if transferFrame then transferFrame.Visible = false end
+-- REMOVED: bankFrame.Visible = true (This was the culprit!)
