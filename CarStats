@@ -1,0 +1,38 @@
+-- ( This ModuleScript holds the stats for your cars. Adjusted for long-term economy stability. )
+local CarStats = {}
+--ServerStorage
+
+-- ⚙️ ECONOMY GUIDE:
+-- To prevent inflation, we start LOW.
+-- If Delta = 1, then a Supercar can be 500.
+-- If Delta = 5, a Supercar has to be 2,500 (Numbers get messy fast).
+
+CarStats.Cars = {
+	["Delta"] = { 
+		CPS = 1,          -- CHANGED: Starts at 1. Slow & steady.
+		Rarity = "Common",
+		Price = 0         -- (Reference for when we add a shop)
+	},
+	["Atom"] = { 
+		CPS = 4,          -- A nice 4x upgrade from Delta.
+		Rarity = "Common",
+		Price = 250
+	},
+	["Windsor"] = { 
+		CPS = 10,         -- Good mid-tier income.
+		Rarity = "Common", 
+		Price = 1200
+	},
+	["Senator"] = { 
+		CPS = 25,         -- Now we're making real money.
+		Rarity = "Common",
+		Price = 4500
+	},
+	["Riva"] = { 
+		CPS = 60,         -- The "King" of Common cars.
+		Rarity = "Rare",
+		Price = 15000
+	}
+}
+
+return CarStats
