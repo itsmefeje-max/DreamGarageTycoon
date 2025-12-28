@@ -1,6 +1,5 @@
---StarterGui
--- ( BANK UI SCRIPT: FORCE HIDE VERSION )
--- This script manages the Bank UI, Camera, and Avatar.
+-- ( BANK UI SCRIPT: FORCE HIDE & TRANSFER FIX )
+-- Fixed: Clicking outside now properly closes the TransferFrame too.
 print("---------------------------------------------------------")
 print("🛠️ STARTING BANK UI SCRIPT...")
 
@@ -29,15 +28,16 @@ local myScreenGui = debugFind(playerGui, "BankGui")
 if not myScreenGui then return end
 
 local mainWindow = debugFind(myScreenGui, "BankFrame")
+local transferFrame = myScreenGui:FindFirstChild("TransferFrame") -- ✅ NEW: Detect the Transfer Frame
 local openButton = debugFind(myScreenGui, "OpenButton")
 
 if not mainWindow or not openButton then return end 
 
--- 🛑 FORCE HIDE IMMEDIATELY (The Safety Lock)
--- We do this NOW so it doesn't matter if the rest of the script takes time.
+-- 🛑 FORCE HIDE IMMEDIATELY
 mainWindow.Visible = false
+if transferFrame then transferFrame.Visible = false end -- ✅ Hide Transfer too
 openButton.Visible = true
-print("🔒 Bank Frame Forced Hidden.")
+print("🔒 Bank Frames Forced Hidden.")
 
 -- 2. FIND INTERNAL PARTS
 local closeButton = debugFind(mainWindow, "CloseButton")
@@ -74,17 +74,11 @@ detector.ZIndex = mainWindow.ZIndex - 1
 detector.Visible = false
 detector.Active = true 
 
--- 4. MONEY VARIABLES (Wait for Leaderstats)
-print("💰 Looking for Leaderstats...")
+-- 4. MONEY VARIABLES
 local leaderstats = player:WaitForChild("leaderstats", 10)
 local cash = nil
-
 if leaderstats then
-	cash = leaderstats:WaitForChild("Cash", 10) -- Change "Cash" if yours is named "Bank"
-end
-
-if not cash then 
-	warn("⚠️ WARNING: Cash/Leaderstats not found. UI will work but balance won't update.")
+	cash = leaderstats:WaitForChild("Cash", 10)
 end
 
 -- ============================================================================
@@ -118,8 +112,18 @@ end
 
 local function setFocusMode(isFocused)
 	detector.Visible = isFocused
-	mainWindow.Visible = isFocused
 	openButton.Visible = not isFocused 
+
+	-- ✅ UPDATED LOGIC: Handle BOTH Frames
+	if isFocused then
+		-- Opening: Show Main, Ensure Transfer is HIDDEN
+		mainWindow.Visible = true
+		if transferFrame then transferFrame.Visible = false end
+	else
+		-- Closing: HIDE EVERYTHING
+		mainWindow.Visible = false
+		if transferFrame then transferFrame.Visible = false end
+	end
 
 	for _, gui in pairs(playerGui:GetChildren()) do
 		if gui:IsA("ScreenGui") and gui ~= myScreenGui then
@@ -162,6 +166,7 @@ closeButton.MouseButton1Click:Connect(function()
 	performClose()
 end) 
 
+-- ✅ Clicking outside closes everything (NO SFX, just like you asked)
 detector.MouseButton1Click:Connect(performClose)
 
 -- HOVER EFFECTS
@@ -177,5 +182,3 @@ if closeButton:IsA("ImageButton") then addHover(closeButton) end
 if cash then cash.Changed:Connect(updateDisplay) end
 task.spawn(loadAvatar)
 
-print("✅ SCRIPT LOADED.")
-print("---------------------------------------------------------")
