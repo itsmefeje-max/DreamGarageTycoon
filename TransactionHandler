@@ -1,4 +1,5 @@
 -- ( SERVER SIDE: Moves Money from Bank -> Wallet )
+--ServerScriptService
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent")
 
