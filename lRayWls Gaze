@@ -1,0 +1,79 @@
+-- this script is used for the gaze of the shopkeeper 
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+-- ⚙️ CONFIGURATION
+local NPC_NAME = "lRayWl" -- The exact name of your Model in Workspace
+local MAX_DISTANCE = 40      -- Studs: How close you must be for them to look
+local TURN_SPEED = 0.1        -- 0.1 = Smooth, 1.0 = Instant
+local HEAD_LIMIT = 60         -- Max angle degrees (prevents broken necks)
+
+-- VARIABLES
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+-- Wait for the NPC to load into the workspace
+local npc = Workspace.NPCS:FindFirstChild("lRayWl")
+
+if not npc then 
+	warn("⚠️ HeadTracker could not find NPC named: " .. NPC_NAME) 
+	return 
+end
+
+-- R15 Specific Body Parts
+local head = npc:WaitForChild("Head")
+local neck = head:WaitForChild("Neck") -- R15 Neck is usually inside Head
+local torso = npc:WaitForChild("UpperTorso")
+local humanoid = npc:WaitForChild("Humanoid")
+
+-- Store the original neck position (So we can add to it, not replace it)
+local originalNeckC0 = neck.C0
+
+-- 🛠️ MATH HELPER: Limit angles
+local function limitAngle(angle, limit)
+	return math.clamp(angle, math.rad(-limit), math.rad(limit))
+end
+
+-- 🔄 MAIN LOOP (Runs every single frame)
+RunService.RenderStepped:Connect(function()
+	if not npc or not npc.Parent then return end
+
+	-- 1. Check Player Distance
+	local myCharacter = player.Character
+	if not myCharacter then return end
+	local myHead = myCharacter:FindFirstChild("Head")
+	if not myHead then return end
+
+	local dist = (head.Position - myHead.Position).Magnitude
+
+	-- 2. Calculate "Look" Goal
+	local goalCFrame = CFrame.new()
+
+	if dist < MAX_DISTANCE then
+		-- A. Get the direction to the player's EYES
+		local lookPos = myHead.Position
+
+		-- B. Convert to "Neck Space" (Relative to the Torso)
+		local torsoCFrame = torso.CFrame
+		local lookVector = torsoCFrame:PointToObjectSpace(lookPos)
+
+		-- C. Math to find the angles
+		local xAngle = math.atan2(lookVector.Y, -lookVector.Z)
+		local yAngle = math.atan2(-lookVector.X, -lookVector.Z)
+
+		-- D. Clamp the angles so it looks natural
+		xAngle = limitAngle(xAngle, HEAD_LIMIT) / 1.5 -- Look up/down less accurately
+		yAngle = limitAngle(yAngle, HEAD_LIMIT)       -- Look left/right accurately
+
+		-- E. Create Rotation
+		goalCFrame = CFrame.Angles(xAngle, yAngle, 0)
+	else
+		-- If player is far, look straight ahead (reset)
+		goalCFrame = CFrame.Angles(0, 0, 0)
+	end
+
+	-- 3. Animate Smoothly
+	-- We Combine (multiply) the Original Animation C0 with our new Rotation
+	neck.C0 = neck.C0:Lerp(originalNeckC0 * goalCFrame, TURN_SPEED)
+end)
