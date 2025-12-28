@@ -1,0 +1,112 @@
+-- ( CLIENT SIDE: Handles Success, Error, NoEarnings, and ADDS PULSING VFX )
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+local ClaimFeedbackEvent = ReplicatedStorage:WaitForChild("ClaimFeedback")
+local ScreenGui = script.Parent
+
+-- ⚠️ ENSURE ALL 4 IMAGES EXIST IN YOUR GUI:
+local SuccessImage = ScreenGui:WaitForChild("SuccessImage")
+local ErrorImage = ScreenGui:WaitForChild("ErrorImage")
+local VerifyingImage = ScreenGui:WaitForChild("VerifyingImage")
+local NoEarningsImage = ScreenGui:WaitForChild("NoEarningsImage")
+
+-- 🔊 SOUND CONFIG
+local CASH_SOUND_ID = "rbxassetid://128506762153961"
+local ERROR_SOUND_ID = "rbxassetid://3779045779"
+local EMPTY_SOUND_ID = "rbxassetid://17620645740"
+
+-- Store original sizes/positions
+local originals = {
+	Success = {Size = SuccessImage.Size, Pos = SuccessImage.Position},
+	Error = {Size = ErrorImage.Size, Pos = ErrorImage.Position},
+	NoEarnings = {Size = NoEarningsImage.Size, Pos = NoEarningsImage.Position}
+}
+
+local currentVerifyTween = nil -- Renamed for clarity (was spinTween)
+
+-- 🛠️ HELPER: Play Sound
+local function playSound(soundId)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = 1
+	sound.Parent = Players.LocalPlayer.PlayerGui 
+	sound:Play()
+	game.Debris:AddItem(sound, 3) 
+end
+
+-- 🛠️ HELPER: Show Image (Instant Appear -> Wait -> Fade Out)
+local function animateImage(imageObject, originalData)
+	-- 1. Reset to start state
+	imageObject.Visible = true
+	imageObject.ImageTransparency = 0 
+	imageObject.Size = originalData.Size 
+	imageObject.Position = originalData.Pos 
+
+	-- 2. Wait
+	task.wait(3) -- Stay visible for 3 seconds
+
+	-- 3. Fade Out
+	local tweenOut = TweenService:Create(imageObject, TweenInfo.new(0.5), {
+		ImageTransparency = 1 
+	})
+	tweenOut:Play()
+	tweenOut.Completed:Wait()
+
+	imageObject.Visible = false
+end
+
+-- 🌀 VFX: Start Verifying (Pulse Effect: Fade In <-> Fade Out)
+local function startVerifying()
+	-- Reset State
+	VerifyingImage.Visible = true
+	VerifyingImage.Rotation = 0 -- Stop any stuck rotation
+	VerifyingImage.ImageTransparency = 1 -- Start invisible
+
+	-- ⚡ PULSE ANIMATION SETUP
+	local pulseInfo = TweenInfo.new(
+		0.5, -- Speed (0.5 seconds per fade)
+		Enum.EasingStyle.Sine, 
+		Enum.EasingDirection.InOut, 
+		-1, -- Repeat Infinite
+		true -- AutoReverse (Goes Invisible -> Visible -> Invisible...)
+	)
+
+	-- Create and Play Tween
+	currentVerifyTween = TweenService:Create(VerifyingImage, pulseInfo, {ImageTransparency = 0})
+	currentVerifyTween:Play()
+end
+
+-- 🛑 VFX: Stop Verifying
+local function stopVerifying()
+	if currentVerifyTween then
+		currentVerifyTween:Cancel() -- Stop the pulse
+		currentVerifyTween = nil
+	end
+	VerifyingImage.Visible = false
+	VerifyingImage.ImageTransparency = 0 -- Reset to normal
+end
+
+-- 📡 LISTEN FOR SIGNAL
+ClaimFeedbackEvent.OnClientEvent:Connect(function(status, amount)
+
+	if status == "Verifying" then
+		startVerifying() -- Start the Pulse VFX
+
+	elseif status == "Success" then
+		stopVerifying() -- Stop VFX
+		playSound(CASH_SOUND_ID)
+		task.spawn(function() animateImage(SuccessImage, originals.Success) end)
+
+	elseif status == "Error" then
+		stopVerifying() -- Stop VFX
+		playSound(ERROR_SOUND_ID)
+		task.spawn(function() animateImage(ErrorImage, originals.Error) end)
+
+	elseif status == "NoEarnings" then
+		stopVerifying() -- Stop VFX
+		playSound(EMPTY_SOUND_ID)
+		task.spawn(function() animateImage(NoEarningsImage, originals.NoEarnings) end)
+	end
+end)
