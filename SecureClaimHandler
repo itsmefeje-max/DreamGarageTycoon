@@ -1,5 +1,5 @@
 -- this script contains the Garage that controls the sign and to whoever the specific Garage belongs to
-
+--ServerScriptService
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
