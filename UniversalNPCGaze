@@ -1,0 +1,77 @@
+--StarterCharacterScripts
+-- ( LOCAL SCRIPT: Universal NPC Gaze )
+-- Handles head tracking for ALL NPCs in the "NPCS" folder automatically.
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local npcFolder = Workspace:WaitForChild("NPCS") -- 📁 This is where your NPCs live
+
+-- ⚙️ GLOBAL CONFIG
+local MAX_DISTANCE = 40       -- Studs: How close you must be
+local TURN_SPEED = 0.1        -- Smoothness
+local HEAD_LIMIT = 60         -- Max rotation angle
+
+-- 🛠️ MATH HELPER
+local function limitAngle(angle, limit)
+	return math.clamp(angle, math.rad(-limit), math.rad(limit))
+end
+
+-- 🔄 MAIN LOOP
+RunService.RenderStepped:Connect(function()
+	local myCharacter = player.Character
+	if not myCharacter then return end
+	local myHead = myCharacter:FindFirstChild("Head")
+	if not myHead then return end
+
+	-- 🔎 LOOP THROUGH EVERY NPC
+	for _, npc in pairs(npcFolder:GetChildren()) do
+		
+		-- Check if it's a valid R15 NPC with all parts
+		if npc:IsA("Model") and npc:FindFirstChild("Head") and npc:FindFirstChild("UpperTorso") then
+			
+			local head = npc.Head
+			local neck = head:FindFirstChild("Neck") -- Neck is usually inside Head
+			local torso = npc.UpperTorso
+			
+			if neck then
+				-- 1. SETUP: Store original C0 if we haven't yet
+				-- We use an Attribute so we don't lose the original position
+				if not neck:GetAttribute("OriginalC0") then
+					neck:SetAttribute("OriginalC0", neck.C0)
+				end
+				local originalC0 = neck:GetAttribute("OriginalC0")
+
+				-- 2. CALCULATE DISTANCE
+				local dist = (head.Position - myHead.Position).Magnitude
+				local goalCFrame = CFrame.new()
+
+				if dist < MAX_DISTANCE then
+					-- A. Direction to player
+					local lookPos = myHead.Position
+					local torsoCFrame = torso.CFrame
+					local lookVector = torsoCFrame:PointToObjectSpace(lookPos)
+
+					-- B. Calculate Angles
+					local xAngle = math.atan2(lookVector.Y, -lookVector.Z)
+					local yAngle = math.atan2(-lookVector.X, -lookVector.Z)
+
+					-- C. Limit Angles (Prevent broken necks)
+					xAngle = limitAngle(xAngle, HEAD_LIMIT) / 1.5 
+					yAngle = limitAngle(yAngle, HEAD_LIMIT)       
+
+					-- D. Create Goal Rotation
+					goalCFrame = CFrame.Angles(xAngle, yAngle, 0)
+				else
+					-- Reset if far away
+					goalCFrame = CFrame.Angles(0, 0, 0)
+				end
+
+				-- 3. ANIMATE
+				neck.C0 = neck.C0:Lerp(originalC0 * goalCFrame, TURN_SPEED)
+			end
+		end
+	end
+end)
