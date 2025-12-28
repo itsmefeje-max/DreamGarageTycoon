@@ -1,0 +1,187 @@
+-- ( HUNTER VERSION: Finds deep buttons to hide, but NEVER touches Frames/Windows )
+
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+local openButton = script.Parent
+
+-- 📂 HIERARCHY FINDER
+local myScreenGui = openButton:FindFirstAncestorWhichIsA("ScreenGui")
+local mainWindow = myScreenGui:WaitForChild("InventoryWindow")
+local itemsContainer = mainWindow:WaitForChild("Container")
+local closeButton = mainWindow:WaitForChild("CloseButton") 
+
+-- ⚙️ CONFIG
+local OPEN_FOV = 50 
+local NORMAL_FOV = 70 
+local CAM_TWEEN_INFO = TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local SOUND_ID = "rbxassetid://9083627113"
+
+-- 🎨 COLORS
+local NORMAL_COLOR = Color3.fromRGB(255, 255, 255) 
+local DIM_COLOR = Color3.fromRGB(170, 170, 170)    
+local BUTTON_GREY = Color3.fromRGB(40, 40, 40)      
+local BUTTON_EQUIPPED = Color3.fromRGB(85, 255, 127) 
+local COLOR_TWEEN = TweenInfo.new(0.2)
+
+pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false) end)
+
+-- ============================================================================
+-- 🛡️ SETUP DETECTOR
+-- ============================================================================
+local detector = Instance.new("TextButton")
+detector.Name = "OutsideDetector"
+detector.Parent = myScreenGui
+detector.Size = UDim2.new(1, 0, 1, 0)
+detector.BackgroundTransparency = 1 
+detector.Text = ""
+detector.ZIndex = mainWindow.ZIndex - 1 
+detector.Visible = false
+detector.Active = true 
+
+-- ============================================================================
+-- 👁️ FOCUS MODE (HUNTER LOGIC)
+-- ============================================================================
+local function setFocusMode(isFocused)
+	-- 1. Manage Self
+	detector.Visible = isFocused
+	mainWindow.Visible = isFocused
+	openButton.Visible = not isFocused 
+
+	-- 2. Toggle Other ScreenGuis (Chat, etc.)
+	local playerGui = player:WaitForChild("PlayerGui")
+	for _, gui in pairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") and gui ~= myScreenGui then
+			gui.Enabled = not isFocused
+		end
+	end
+
+	-- 3. Toggle Sibling Buttons (Deep Search)
+	-- We look at EVERYTHING (Descendants) but ONLY touch Buttons.
+	for _, obj in pairs(myScreenGui:GetDescendants()) do
+
+		-- ✅ RULE 1: Only touch BUTTONS (TextButton or ImageButton)
+		if obj:IsA("GuiButton") then
+
+			-- ✅ RULE 2: Protect the Inventory Window
+			-- If the button is inside our Inventory, LEAVE IT ALONE.
+			local isInventoryPart = obj:IsDescendantOf(mainWindow)
+			local isOpenButton = (obj == openButton)
+			local isDetector = (obj == detector)
+
+			if not isInventoryPart and not isOpenButton and not isDetector then
+				-- If we are here, it is a "Clutter Button" (like Bank Open Button)
+				-- Hide it when focused, Show it when closed.
+				obj.Visible = not isFocused
+			end
+		end
+
+		-- 🛑 RULE 3: IGNORE FRAMES
+		-- We do NOT touch Frames, ScrollingFrames, or Labels. 
+		-- This prevents the "Bank UI disappearing" bug.
+	end
+
+	-- 4. Freeze Character
+	local character = player.Character
+	if character then
+		local humanoid = character:FindFirstChild("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = isFocused and 0 or 16
+			humanoid.JumpPower = isFocused and 0 or 50
+		end
+	end
+end
+
+-- ============================================================================
+-- 🎒 INVENTORY POPULATION
+-- ============================================================================
+local function updateInventory()
+	for _, child in pairs(itemsContainer:GetChildren()) do
+		if child:IsA("GuiButton") then child:Destroy() end
+	end
+
+	local items = {}
+	for _, tool in pairs(player.Backpack:GetChildren()) do
+		if tool:IsA("Tool") then table.insert(items, tool) end
+	end
+	if player.Character then
+		local t = player.Character:FindFirstChildWhichIsA("Tool")
+		if t then table.insert(items, t) end
+	end
+
+	for _, tool in pairs(items) do
+		local btn = Instance.new("TextButton")
+		btn.Name = tool.Name
+		btn.Text = tool.Name
+		btn.Parent = itemsContainer
+		btn.TextScaled = true
+		btn.Font = Enum.Font.GothamBold
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+		local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = btn
+
+		local equippedTool = player.Character and player.Character:FindFirstChildWhichIsA("Tool")
+		if equippedTool == tool then
+			btn.BackgroundColor3 = BUTTON_EQUIPPED 
+			btn.TextColor3 = Color3.fromRGB(0, 0, 0) 
+			btn.Text = tool.Name .. " (Equipped)" 
+		else
+			btn.BackgroundColor3 = BUTTON_GREY 
+			btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		end
+
+		btn.MouseButton1Click:Connect(function()
+			local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+			if humanoid then
+				if tool.Parent == player.Character then
+					humanoid:UnequipTools()
+				else
+					humanoid:EquipTool(tool)
+				end
+				updateInventory()
+			end
+		end)
+	end
+end
+
+-- ============================================================================
+-- 🟢 OPEN LOGIC
+-- ============================================================================
+openButton.MouseButton1Click:Connect(function()
+	local s = Instance.new("Sound"); s.SoundId = SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 2)
+
+	updateInventory()
+	setFocusMode(true) 
+	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = OPEN_FOV}):Play()
+end)
+
+-- ============================================================================
+-- 🔴 CLOSE LOGIC
+-- ============================================================================
+local function performClose()
+	setFocusMode(false) 
+	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = NORMAL_FOV}):Play()
+end
+
+closeButton.MouseButton1Click:Connect(function()
+	local s = Instance.new("Sound"); s.SoundId = SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 2)
+	performClose()
+end)
+
+detector.MouseButton1Click:Connect(function()
+	performClose()
+end)
+
+-- ============================================================================
+-- 🎨 HOVER ANIMATIONS
+-- ============================================================================
+openButton.MouseEnter:Connect(function() TweenService:Create(openButton, COLOR_TWEEN, {ImageColor3 = DIM_COLOR}):Play() end)
+openButton.MouseLeave:Connect(function() TweenService:Create(openButton, COLOR_TWEEN, {ImageColor3 = NORMAL_COLOR}):Play() end)
+closeButton.MouseEnter:Connect(function() TweenService:Create(closeButton, COLOR_TWEEN, {ImageColor3 = DIM_COLOR}):Play() end)
+closeButton.MouseLeave:Connect(function() TweenService:Create(closeButton, COLOR_TWEEN, {ImageColor3 = NORMAL_COLOR}):Play() end)
+closeButton.MouseButton1Down:Connect(function() closeButton.ImageColor3 = DIM_COLOR end)
