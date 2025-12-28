@@ -1,0 +1,77 @@
+-- ( SERVER SIDE: V3 - Bank (Cash) vs Wallet )
+local Players = game:GetService("Players")
+local ServerStorage = game:GetService("ServerStorage")
+local DataStoreService = game:GetService("DataStoreService")
+
+-- 🔒 DATABASE CONFIG
+local DATA_KEY = "TycoonData_Economy_V3" -- Bumped to V3 for new Wallet Value
+local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
+
+-- 📂 STORAGE
+local CarTools = ServerStorage:WaitForChild("CarTools") 
+local STARTER_CAR_NAME = "Delta Item"
+
+-- 🛠️ HELPER
+local function giveTool(player, toolName)
+	if player.Backpack:FindFirstChild(toolName) or player.StarterGear:FindFirstChild(toolName) then return end
+	local tool = CarTools:FindFirstChild(toolName)
+	if tool then
+		tool:Clone().Parent = player.Backpack
+		tool:Clone().Parent = player.StarterGear
+	end
+end
+
+-- 📥 JOIN
+Players.PlayerAdded:Connect(function(player)
+	local leaderstats = Instance.new("Folder"); leaderstats.Name = "leaderstats"; leaderstats.Parent = player
+
+	-- 🏦 "Cash" is your BANK BALANCE (Tycoon deposits here)
+	local bank = Instance.new("IntValue"); bank.Name = "Cash"; bank.Parent = leaderstats
+
+	-- 💵 "Wallet" is your SPENDING MONEY (For buying pads)
+	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Value = 0; wallet.Parent = leaderstats
+
+	-- Load Data
+	local playerKey = "User_" .. player.UserId
+	local savedData = nil
+	pcall(function() savedData = PlayerDataStore:GetAsync(playerKey) end)
+
+	if savedData then
+		print("✅ Loaded Data for " .. player.Name)
+		bank.Value = savedData.Bank or 0   -- Load Bank
+		wallet.Value = savedData.Wallet or 0 -- Load Wallet
+
+		if savedData.Inventory then
+			for _, tName in pairs(savedData.Inventory) do giveTool(player, tName) end
+		end
+	else
+		print("🆕 New Player.")
+		bank.Value = 0
+		wallet.Value = 0
+		giveTool(player, STARTER_CAR_NAME) 
+	end
+end)
+
+-- 💾 LEAVE
+local function savePlayerData(player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then return end
+
+	local inventoryTable = {}
+	for _, tool in pairs(player.StarterGear:GetChildren()) do
+		if CarTools:FindFirstChild(tool.Name) then table.insert(inventoryTable, tool.Name) end
+	end
+
+	local dataToSave = {
+		Bank = leaderstats.Cash.Value,   -- Saving Bank
+		Wallet = leaderstats.Wallet.Value, -- Saving Wallet
+		Inventory = inventoryTable
+	}
+
+	local playerKey = "User_" .. player.UserId
+	PlayerDataStore:SetAsync(playerKey, dataToSave)
+	print("💾 Saved Bank & Wallet for " .. player.Name)
+end
+
+Players.PlayerRemoving:Connect(savePlayerData)
+game:BindToClose(function() for _, p in pairs(Players:GetPlayers()) do savePlayerData(p) end end)
