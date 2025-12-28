@@ -1,113 +1,63 @@
--- ( CLIENT SIDE: Handles Success, Error, NoEarnings, and ADDS PULSING VFX )
---StarterGui
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
+-- this script handles the teleport system of the player to go to shop and go back to plot
+
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
 
-local ClaimFeedbackEvent = ReplicatedStorage:WaitForChild("ClaimFeedback")
-local ScreenGui = script.Parent
+local player = Players.LocalPlayer
+local button = script.Parent
 
--- ⚠️ ENSURE ALL 4 IMAGES EXIST IN YOUR GUI:
-local SuccessImage = ScreenGui:WaitForChild("SuccessImage")
-local ErrorImage = ScreenGui:WaitForChild("ErrorImage")
-local VerifyingImage = ScreenGui:WaitForChild("VerifyingImage")
-local NoEarningsImage = ScreenGui:WaitForChild("NoEarningsImage")
+-- ⚙️ CONFIGURATION
+local SHOP_PART_NAME = "ATM-teleport-pad"
+local SOUND_ID = "rbxassetid://9083627113"
 
--- 🔊 SOUND CONFIG
-local CASH_SOUND_ID = "rbxassetid://128506762153961"
-local ERROR_SOUND_ID = "rbxassetid://3779045779"
-local EMPTY_SOUND_ID = "rbxassetid://17620645740"
+-- 🎨 DIM HOVER SETTINGS (Minimal Aesthetic)
+local NORMAL_COLOR = Color3.fromRGB(255, 255, 255) -- Bright/Normal
+local DIM_COLOR = Color3.fromRGB(170, 170, 170)    -- Slightly Darker on Hover
+local TWEEN_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- Store original sizes/positions
-local originals = {
-	Success = {Size = SuccessImage.Size, Pos = SuccessImage.Position},
-	Error = {Size = ErrorImage.Size, Pos = ErrorImage.Position},
-	NoEarnings = {Size = NoEarningsImage.Size, Pos = NoEarningsImage.Position}
-}
+-- ============================================================================
+-- 🖌️ DIM ANIMATION LOGIC
+-- ============================================================================
 
-local currentVerifyTween = nil -- Renamed for clarity (was spinTween)
+-- Hover Enter -> Dim
+button.MouseEnter:Connect(function()
+	TweenService:Create(button, TWEEN_INFO, {ImageColor3 = DIM_COLOR}):Play()
+end)
 
--- 🛠️ HELPER: Play Sound
-local function playSound(soundId)
+-- Hover Leave -> Bright (Reset)
+button.MouseLeave:Connect(function()
+	TweenService:Create(button, TWEEN_INFO, {ImageColor3 = NORMAL_COLOR}):Play()
+end)
+
+-- Click -> Keep Dim (Visual feedback)
+button.MouseButton1Down:Connect(function()
+	button.ImageColor3 = DIM_COLOR
+end)
+
+-- ============================================================================
+-- 🛒 TELEPORT LOGIC
+-- ============================================================================
+button.MouseButton1Click:Connect(function()
+	-- Play Sound
 	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = 1
-	sound.Parent = Players.LocalPlayer.PlayerGui 
+	sound.SoundId = SOUND_ID
+	sound.Volume = 0.5
+	sound.Parent = SoundService
 	sound:Play()
-	game.Debris:AddItem(sound, 3) 
-end
+	game.Debris:AddItem(sound, 2)
 
--- 🛠️ HELPER: Show Image (Instant Appear -> Wait -> Fade Out)
-local function animateImage(imageObject, originalData)
-	-- 1. Reset to start state
-	imageObject.Visible = true
-	imageObject.ImageTransparency = 0 
-	imageObject.Size = originalData.Size 
-	imageObject.Position = originalData.Pos 
+	-- Teleport
+	local shopPart = Workspace:FindFirstChild(SHOP_PART_NAME)
 
-	-- 2. Wait
-	task.wait(3) -- Stay visible for 3 seconds
-
-	-- 3. Fade Out
-	local tweenOut = TweenService:Create(imageObject, TweenInfo.new(0.5), {
-		ImageTransparency = 1 
-	})
-	tweenOut:Play()
-	tweenOut.Completed:Wait()
-
-	imageObject.Visible = false
-end
-
--- 🌀 VFX: Start Verifying (Pulse Effect: Fade In <-> Fade Out)
-local function startVerifying()
-	-- Reset State
-	VerifyingImage.Visible = true
-	VerifyingImage.Rotation = 0 -- Stop any stuck rotation
-	VerifyingImage.ImageTransparency = 1 -- Start invisible
-
-	-- ⚡ PULSE ANIMATION SETUP
-	local pulseInfo = TweenInfo.new(
-		0.5, -- Speed (0.5 seconds per fade)
-		Enum.EasingStyle.Sine, 
-		Enum.EasingDirection.InOut, 
-		-1, -- Repeat Infinite
-		true -- AutoReverse (Goes Invisible -> Visible -> Invisible...)
-	)
-
-	-- Create and Play Tween
-	currentVerifyTween = TweenService:Create(VerifyingImage, pulseInfo, {ImageTransparency = 0})
-	currentVerifyTween:Play()
-end
-
--- 🛑 VFX: Stop Verifying
-local function stopVerifying()
-	if currentVerifyTween then
-		currentVerifyTween:Cancel() -- Stop the pulse
-		currentVerifyTween = nil
-	end
-	VerifyingImage.Visible = false
-	VerifyingImage.ImageTransparency = 0 -- Reset to normal
-end
-
--- 📡 LISTEN FOR SIGNAL
-ClaimFeedbackEvent.OnClientEvent:Connect(function(status, amount)
-
-	if status == "Verifying" then
-		startVerifying() -- Start the Pulse VFX
-
-	elseif status == "Success" then
-		stopVerifying() -- Stop VFX
-		playSound(CASH_SOUND_ID)
-		task.spawn(function() animateImage(SuccessImage, originals.Success) end)
-
-	elseif status == "Error" then
-		stopVerifying() -- Stop VFX
-		playSound(ERROR_SOUND_ID)
-		task.spawn(function() animateImage(ErrorImage, originals.Error) end)
-
-	elseif status == "NoEarnings" then
-		stopVerifying() -- Stop VFX
-		playSound(EMPTY_SOUND_ID)
-		task.spawn(function() animateImage(NoEarningsImage, originals.NoEarnings) end)
+	if shopPart then
+		local char = player.Character
+		if char then
+			-- Teleport with +3 studs height to prevent getting stuck in floor
+			char:PivotTo(shopPart.CFrame + Vector3.new(0, 3, 0))
+		end
+	else
+		warn("❌ Teleport Target '"..SHOP_PART_NAME.."' not found in Workspace!")
 	end
 end)
