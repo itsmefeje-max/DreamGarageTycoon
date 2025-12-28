@@ -1,0 +1,240 @@
+-- This script lets a player place a car onto a pad in their own tycoon, 
+-- plays a placement sound, and lets them pick the car back up, while preventing other players from messing with it.
+
+
+
+local ServerStorage = game:GetService("ServerStorage")
+local Workspace = game:GetService("Workspace")
+local StarterPack = game:GetService("StarterPack")
+local Debris = game:GetService("Debris")
+
+-- === ⚙️ TUNING ===
+local VERTICAL_OFFSET = -1
+local PROMPT_RANGE = 14  
+-- =================
+
+local CarModels = ServerStorage:WaitForChild("CarModels")
+local TycoonFolder = Workspace:WaitForChild("Tycoons") 
+
+local function getPlotFolder(obj)
+	local current = obj
+	while current and current.Parent do
+		if current.Parent == TycoonFolder then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function getMainPart(obj)
+	if obj:IsA("BasePart") then return obj end
+	if obj:IsA("Model") then
+		if obj.PrimaryPart then return obj.PrimaryPart end
+		return obj:FindFirstChildWhichIsA("BasePart")
+	end
+	return nil
+end
+
+local function setupPad(padObject)
+	local padPart = getMainPart(padObject)
+	if not padPart then return end
+
+	-- 🧹 CLEANUP
+	for _, child in pairs(padPart:GetChildren()) do
+		if child:IsA("ProximityPrompt") and child.Name == "ProximityPrompt" then
+			child:Destroy()
+		end
+	end
+
+	-- 1. SETUP VALUES
+	local occupiedVal = padPart:FindFirstChild("IsOccupied")
+	if not occupiedVal then
+		occupiedVal = Instance.new("BoolValue"); occupiedVal.Name = "IsOccupied"; occupiedVal.Parent = padPart
+	end
+
+	local linkedCarVal = padPart:FindFirstChild("LinkedCar")
+	if not linkedCarVal then
+		linkedCarVal = Instance.new("ObjectValue"); linkedCarVal.Name = "LinkedCar"; linkedCarVal.Parent = padPart
+	end
+
+	-- 2. SETUP PROMPTS
+	local placePrompt = padPart:FindFirstChild("PlacePrompt")
+	if not placePrompt then
+		placePrompt = Instance.new("ProximityPrompt")
+		placePrompt.Name = "PlacePrompt"
+		placePrompt.ActionText = "Place Car"
+		placePrompt.ObjectText = "Car Pad"
+		placePrompt.HoldDuration = 0.5
+		placePrompt.MaxActivationDistance = PROMPT_RANGE 
+		placePrompt.RequiresLineOfSight = false 
+		placePrompt.Parent = padPart
+	end
+
+	local pickupPrompt = padPart:FindFirstChild("PickupPrompt")
+	if not pickupPrompt then
+		pickupPrompt = Instance.new("ProximityPrompt")
+		pickupPrompt.Name = "PickupPrompt"
+		pickupPrompt.ActionText = "Pick Up"
+		pickupPrompt.ObjectText = "Occupied Pad"
+		pickupPrompt.HoldDuration = 0.5
+		pickupPrompt.MaxActivationDistance = PROMPT_RANGE 
+		pickupPrompt.RequiresLineOfSight = false 
+		pickupPrompt.Enabled = false 
+		pickupPrompt.Parent = padPart
+	end
+
+	if occupiedVal.Value == true then
+		placePrompt.Enabled = false
+		pickupPrompt.Enabled = true
+	else
+		placePrompt.Enabled = true
+		pickupPrompt.Enabled = false
+	end
+
+	local isProcessing = false
+
+	-- =========================================================================
+	-- 🟢 PLACE LOGIC (FIXED SOUND)
+	-- =========================================================================
+	placePrompt.Triggered:Connect(function(player)
+		if isProcessing then return end
+		if occupiedVal.Value == true then return end
+
+		isProcessing = true 
+
+		local thisPlot = getPlotFolder(padObject)
+		if not thisPlot then isProcessing = false; return end
+
+		local myAssignedPlot = player:GetAttribute("OccupiedPlot")
+		if myAssignedPlot ~= thisPlot.Name then
+			warn("⛔ ACCESS DENIED.")
+			isProcessing = false; return 
+		end
+
+		local tool = player.Character:FindFirstChildWhichIsA("Tool")
+		if tool then
+			local cleanName = tool.Name:gsub(" Item", ""):gsub("Item", "")
+			local realCar = CarModels:FindFirstChild(cleanName)
+
+			if realCar then
+				occupiedVal.Value = true
+				placePrompt.Enabled = false
+				pickupPrompt.Enabled = true
+
+				tool:Destroy()
+
+				local placedCar = realCar:Clone()
+				local padTop = padPart.CFrame * CFrame.new(0, (padPart.Size.Y / 2) + VERTICAL_OFFSET + 1, 0)
+				placedCar:PivotTo(padTop)
+
+				local carFolder = thisPlot:FindFirstChild("PlacedCars")
+				if carFolder then placedCar.Parent = carFolder else placedCar.Parent = thisPlot end
+
+				-- 🔊 SOUND FIX: Play sound on the PAD, not the CAR
+				-- This ensures it works even if the car model is weird
+				local soundFolder = game.ReplicatedStorage:FindFirstChild("GameSounds")
+				if soundFolder and soundFolder:FindFirstChild("PlaceSound") then
+					local sClone = soundFolder.PlaceSound:Clone()
+					sClone.Parent = padPart -- Attached to Pad (Guaranteed to exist)
+					sClone:Play()
+					Debris:AddItem(sClone, 2)
+				else
+					warn("⚠️ Missing Sound: Check ReplicatedStorage > GameSounds > PlaceSound")
+				end
+
+				-- Ghost Mode
+				for _, part in pairs(placedCar:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.Anchored = true; part.CanCollide = false
+					end
+				end
+
+				linkedCarVal.Value = placedCar
+				print("✅ Car placed: " .. cleanName)
+			else
+				warn("❌ Model not found: " .. cleanName)
+				occupiedVal.Value = false
+				placePrompt.Enabled = true
+			end
+		end
+
+		task.wait(0.2)
+		isProcessing = false
+	end)
+
+	-- =========================================================================
+	-- 🔴 PICKUP LOGIC
+	-- =========================================================================
+	pickupPrompt.Triggered:Connect(function(player)
+		if isProcessing then return end
+		isProcessing = true
+
+		local thisPlot = getPlotFolder(padObject)
+		local myAssignedPlot = player:GetAttribute("OccupiedPlot")
+
+		if not thisPlot or myAssignedPlot ~= thisPlot.Name then 
+			isProcessing = false; return 
+		end
+
+		local carToRemove = linkedCarVal.Value
+
+		if carToRemove then
+			local carName = carToRemove.Name
+			local toolToGive = nil
+			local possibleNames = {carName .. " Item", carName .. "Item", carName}
+
+			local function findTool(container)
+				for _, name in ipairs(possibleNames) do
+					for _, child in ipairs(container:GetDescendants()) do
+						if child:IsA("Tool") and child.Name == name then
+							return child:Clone()
+						end
+					end
+				end
+				return nil
+			end
+
+			toolToGive = findTool(ServerStorage) or findTool(StarterPack)
+
+			if toolToGive then
+				toolToGive.Parent = player.Backpack
+				carToRemove:Destroy()
+
+				occupiedVal.Value = false
+				linkedCarVal.Value = nil
+
+				placePrompt.Enabled = true
+				pickupPrompt.Enabled = false
+
+				local soundFolder = game.ReplicatedStorage:FindFirstChild("GameSounds")
+				if soundFolder and soundFolder:FindFirstChild("EquipSound") then
+					local sClone = soundFolder.EquipSound:Clone()
+					sClone.Parent = padPart
+					sClone:Play()
+					Debris:AddItem(sClone, 2)
+				end
+				print("♻️ Picked up: " .. carName)
+			else
+				warn("❌ Tool not found in Storage for: " .. carName)
+			end
+		else
+			occupiedVal.Value = false
+			placePrompt.Enabled = true
+			pickupPrompt.Enabled = false
+		end
+
+		task.wait(0.2)
+		isProcessing = false
+	end)
+end
+
+-- 🔄 LOOP
+for _, plot in pairs(TycoonFolder:GetChildren()) do
+	local padsFolder = plot:FindFirstChild("Pads")
+	if padsFolder then
+		for _, pad in pairs(padsFolder:GetChildren()) do
+			setupPad(pad)
+		end
+	end
+end
