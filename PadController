@@ -1,6 +1,6 @@
 -- This script lets a player place a car onto a pad in their own tycoon, 
 -- plays a placement sound, and lets them pick the car back up, while preventing other players from messing with it.
-
+--ServerScriptService
 
 
 local ServerStorage = game:GetService("ServerStorage")
