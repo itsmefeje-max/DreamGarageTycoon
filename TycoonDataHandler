@@ -1,4 +1,5 @@
 -- ( SERVER SIDE: V3 - Bank (Cash) vs Wallet )
+--ServerScriptService
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
