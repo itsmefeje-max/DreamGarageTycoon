@@ -1,4 +1,5 @@
 -- ( This script handles the core economy: detecting placed cars and generating cash into the plot's storage )
+--ServerScriptService
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
