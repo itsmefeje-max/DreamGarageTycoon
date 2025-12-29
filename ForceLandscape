@@ -1,0 +1,20 @@
+-- ( LOCAL SCRIPT: Force Landscape Mode )
+-- Forces mobile players to use Landscape mode so UI fits perfectly.
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ⚙️ CONFIGURATION
+-- LandscapeSensor = Horizontal (Allows flipping Left/Right)
+local TARGET_ORIENTATION = Enum.ScreenOrientation.LandscapeSensor
+
+-- 1. APPLY IMMEDIATELY
+playerGui.ScreenOrientation = TARGET_ORIENTATION
+
+-- 2. ENFORCE (Prevents them from switching back)
+playerGui:GetPropertyChangedSignal("ScreenOrientation"):Connect(function()
+	if playerGui.ScreenOrientation ~= TARGET_ORIENTATION then
+		playerGui.ScreenOrientation = TARGET_ORIENTATION
+	end
+end)
