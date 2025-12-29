@@ -1,5 +1,6 @@
--- ( This script handles the core economy: detecting placed cars and generating cash into the plot's storage )
---ServerScriptService
+-- ( SERVER SCRIPT: TycoonEconomy - SUFFIX UPDATE )
+-- Handles: Car Earnings Generation & Floating Text (With K/M/B Suffixes)
+
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -8,11 +9,24 @@ local CarStats = require(ServerStorage:WaitForChild("CarStats"))
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
 -- ⚙️ SETTINGS
-local PAY_INTERVAL = 1 -- How often to generate cash (seconds)
+local PAY_INTERVAL = 1 -- Seconds
 
--- 🛠️ FUNCTION: Create the 3D GUI above the car (Visuals only)
+-- 📊 ABBREVIATION HELPER
+local SUFFIXES = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
+
+local function formatNumber(n)
+	n = tonumber(n)
+	if not n then return "0" end
+	if n < 1000 then return tostring(math.floor(n)) end
+	local i = math.floor(math.log(n, 1000))
+	local v = math.pow(1000, i)
+	local suffix = SUFFIXES[i] or "?"
+	return string.format("%.2f%s", n / v, suffix)
+end
+
+-- 🛠️ FUNCTION: Create Floating UI
 local function addCashUI(carModel, cpsAmount)
-	-- Remove existing UI if any to prevent duplicates
+	-- Clean up old UI
 	local existing = carModel:FindFirstChild("CashBillboard")
 	if existing then existing:Destroy() end
 
@@ -28,26 +42,23 @@ local function addCashUI(carModel, cpsAmount)
 	txt.Parent = bb
 	txt.Size = UDim2.new(1, 0, 1, 0)
 	txt.BackgroundTransparency = 1
-	txt.Text = "+$" .. cpsAmount .. "/s"
-	txt.TextColor3 = Color3.fromRGB(85, 255, 127) -- Money Green
+	-- ✅ UPDATE: Now uses formatNumber!
+	txt.Text = "+$" .. formatNumber(cpsAmount) .. "/s"
+	txt.TextColor3 = Color3.fromRGB(85, 255, 127) 
 	txt.TextStrokeTransparency = 0
 	txt.Font = Enum.Font.FredokaOne
 	txt.TextSize = 20
 end
 
 -- 🛠️ FUNCTION: Setup Pad Listener
--- Connects to a specific pad to watch for car placement/removal
 local function setupPadListener(pad)
 	local linkedCarVal = pad:WaitForChild("LinkedCar", 5)
 	if not linkedCarVal then return end
 
-	-- Listen for changes
 	linkedCarVal.Changed:Connect(function(newCar)
 		if newCar and newCar:IsA("Model") then
-			-- A car was placed. Check config.
 			local carName = newCar.Name
 			local stats = CarStats.Cars[carName]
-
 			if stats then
 				addCashUI(newCar, stats.CPS)
 			end
@@ -55,9 +66,8 @@ local function setupPadListener(pad)
 	end)
 end
 
--- 🔄 INITIALIZATION: Setup existing plots
+-- 🔄 INITIALIZATION
 for _, plot in pairs(TycoonFolder:GetChildren()) do
-	-- 1. Create the "Mailbox" for cash on this plot (PendingEarnings)
 	if not plot:FindFirstChild("PendingEarnings") then
 		local pendingInt = Instance.new("IntValue")
 		pendingInt.Name = "PendingEarnings"
@@ -65,7 +75,6 @@ for _, plot in pairs(TycoonFolder:GetChildren()) do
 		pendingInt.Parent = plot
 	end
 
-	-- 2. Setup listeners for all pads
 	local padsFolder = plot:FindFirstChild("Pads")
 	if padsFolder then
 		for _, pad in pairs(padsFolder:GetChildren()) do
@@ -74,25 +83,18 @@ for _, plot in pairs(TycoonFolder:GetChildren()) do
 	end
 end
 
--- 💰 MAIN CASH ACCUMULATION LOOP
+-- 💰 MAIN LOOP
 task.spawn(function()
 	while true do
 		task.wait(PAY_INTERVAL)
-
-		-- Iterate through every plot to calculate earnings
 		for _, plot in pairs(TycoonFolder:GetChildren()) do
 			local pendingValue = plot:FindFirstChild("PendingEarnings")
 			local padsFolder = plot:FindFirstChild("Pads")
 
 			if pendingValue and padsFolder then
 				local plotTotalIncome = 0
-
-				-- Check every pad in this plot
 				for _, pad in pairs(padsFolder:GetChildren()) do
-					-- We check the ObjectValue "LinkedCar"
 					local linkedCar = pad:FindFirstChild("LinkedCar") and pad.LinkedCar.Value
-
-					-- Verify the car model actually exists in workspace
 					if linkedCar and linkedCar.Parent then
 						local stats = CarStats.Cars[linkedCar.Name]
 						if stats then
@@ -100,8 +102,6 @@ task.spawn(function()
 						end
 					end
 				end
-
-				-- Deposit cash into the plot's pending storage
 				if plotTotalIncome > 0 then
 					pendingValue.Value = pendingValue.Value + plotTotalIncome
 				end
