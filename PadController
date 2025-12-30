@@ -1,7 +1,5 @@
--- This script lets a player place a car onto a pad in their own tycoon, 
--- plays a placement sound, and lets them pick the car back up, while preventing other players from messing with it.
---ServerScriptService
-
+-- ( SERVER SCRIPT: PadController - FIXED PICKUP )
+-- Refactored to specifically look in 'CarTools' for reliable item retrieval.
 
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
@@ -13,7 +11,10 @@ local VERTICAL_OFFSET = -1
 local PROMPT_RANGE = 14  
 -- =================
 
+-- 📂 FOLDER REFERENCES
+-- We specifically reference CarTools so we can find the items reliably.
 local CarModels = ServerStorage:WaitForChild("CarModels")
+local CarTools = ServerStorage:WaitForChild("CarTools") -- ✅ Added this line
 local TycoonFolder = Workspace:WaitForChild("Tycoons") 
 
 local function getPlotFolder(obj)
@@ -95,7 +96,7 @@ local function setupPad(padObject)
 	local isProcessing = false
 
 	-- =========================================================================
-	-- 🟢 PLACE LOGIC (FIXED SOUND)
+	-- 🟢 PLACE LOGIC
 	-- =========================================================================
 	placePrompt.Triggered:Connect(function(player)
 		if isProcessing then return end
@@ -131,16 +132,12 @@ local function setupPad(padObject)
 				local carFolder = thisPlot:FindFirstChild("PlacedCars")
 				if carFolder then placedCar.Parent = carFolder else placedCar.Parent = thisPlot end
 
-				-- 🔊 SOUND FIX: Play sound on the PAD, not the CAR
-				-- This ensures it works even if the car model is weird
 				local soundFolder = game.ReplicatedStorage:FindFirstChild("GameSounds")
 				if soundFolder and soundFolder:FindFirstChild("PlaceSound") then
 					local sClone = soundFolder.PlaceSound:Clone()
-					sClone.Parent = padPart -- Attached to Pad (Guaranteed to exist)
+					sClone.Parent = padPart
 					sClone:Play()
 					Debris:AddItem(sClone, 2)
-				else
-					warn("⚠️ Missing Sound: Check ReplicatedStorage > GameSounds > PlaceSound")
 				end
 
 				-- Ghost Mode
@@ -164,7 +161,7 @@ local function setupPad(padObject)
 	end)
 
 	-- =========================================================================
-	-- 🔴 PICKUP LOGIC
+	-- 🔴 PICKUP LOGIC (REFACTORED)
 	-- =========================================================================
 	pickupPrompt.Triggered:Connect(function(player)
 		if isProcessing then return end
@@ -181,24 +178,34 @@ local function setupPad(padObject)
 
 		if carToRemove then
 			local carName = carToRemove.Name
-			local toolToGive = nil
+			local foundTool = nil
+			
+			-- ✅ Names to check (e.g. "Delta Item", "Delta", "DeltaItem")
 			local possibleNames = {carName .. " Item", carName .. "Item", carName}
 
-			local function findTool(container)
-				for _, name in ipairs(possibleNames) do
-					for _, child in ipairs(container:GetDescendants()) do
-						if child:IsA("Tool") and child.Name == name then
-							return child:Clone()
-						end
-					end
+			-- 🔎 SEARCH 1: Check CarTools folder directly (FAST & RELIABLE)
+			for _, name in ipairs(possibleNames) do
+				local t = CarTools:FindFirstChild(name)
+				if t and t:IsA("Tool") then
+					foundTool = t:Clone()
+					break
 				end
-				return nil
 			end
 
-			toolToGive = findTool(ServerStorage) or findTool(StarterPack)
+			-- 🔎 SEARCH 2: Fallback to StarterPack if not in CarTools
+			if not foundTool then
+				for _, name in ipairs(possibleNames) do
+					local t = StarterPack:FindFirstChild(name)
+					if t and t:IsA("Tool") then
+						foundTool = t:Clone()
+						break
+					end
+				end
+			end
 
-			if toolToGive then
-				toolToGive.Parent = player.Backpack
+			-- ✅ GIVE TOOL
+			if foundTool then
+				foundTool.Parent = player.Backpack
 				carToRemove:Destroy()
 
 				occupiedVal.Value = false
@@ -214,11 +221,12 @@ local function setupPad(padObject)
 					sClone:Play()
 					Debris:AddItem(sClone, 2)
 				end
-				print("♻️ Picked up: " .. carName)
+				print("♻️ Picked up: " .. carName .. " (Tool Given)")
 			else
-				warn("❌ Tool not found in Storage for: " .. carName)
+				warn("❌ CRITICAL: Could not find tool for '" .. carName .. "' in ServerStorage.CarTools!")
 			end
 		else
+			-- Reset if car was already gone
 			occupiedVal.Value = false
 			placePrompt.Enabled = true
 			pickupPrompt.Enabled = false
