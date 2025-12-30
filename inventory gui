@@ -55,14 +55,14 @@ for _, rarity in ipairs(tierNames) do
 	if bgObj then
 		-- Map the RARITY name (e.g., "Common") to the IMAGE OBJECT
 		tierBackgrounds[rarity] = bgObj
-
+		
 		-- ✅ FIX 2: ZIndex Auto-Correction
 		-- Forces the image to be exactly 1 layer above the Window Frame
 		-- This fixes the issue where the image is "Visible" but hidden behind the grey box.
 		if bgObj.ZIndex <= mainWindow.ZIndex then
 			bgObj.ZIndex = mainWindow.ZIndex + 1
 		end
-
+		
 		bgObj.Visible = false -- Start hidden
 	else
 		warn("⚠️ Inventory Script Warning: Could not find image '" .. bgName .. "' inside InventoryWindow.")
