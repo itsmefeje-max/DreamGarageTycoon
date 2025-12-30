@@ -154,11 +154,11 @@ local function updateInventory()
 			end
 		end
 	end
-	
+
 	-- ✅ ONLY scan where the items actually exist
 	scan(player:FindFirstChild("Backpack")) 
 	scan(player.Character) -- Checks your hands
-	
+
 	-- ❌ REMOVED: scan(player:FindFirstChild("StarterGear")) 
 	-- This was causing the "Ghost Button" glitch!
 
