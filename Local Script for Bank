@@ -1,5 +1,5 @@
--- ( BANK UI SCRIPT: SUFFIX UPDATE )
--- Now displays 1.5M, 2.4B, etc.
+-- ( LOCAL SCRIPT: Bank UI - WITH MUSIC, FADE & SMART HIDE )
+-- ( Updated to match Inventory GUI's sound & logic )
 
 print("---------------------------------------------------------")
 print("🛠️ STARTING BANK UI SCRIPT...")
@@ -47,16 +47,40 @@ local avatarImage = debugFind(headerContainer, "AvatarImage")
 if not greetingLabel or not avatarImage then return end
 greetingLabel.RichText = true 
 
--- ⚙️ CONFIG
+-- ⚙️ CONFIG & SOUNDS
 local OPEN_FOV = 50       
 local NORMAL_FOV = 70       
 local CAM_TWEEN_INFO = TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 local HOVER_TWEEN = TweenInfo.new(0.2)
-local SOUND_ID = "rbxassetid://9083627113" 
 local NORMAL_COLOR = Color3.fromRGB(255, 255, 255) 
 local DIM_COLOR = Color3.fromRGB(200, 200, 200)   
 
--- 3. SETUP CLICK DETECTOR
+-- 🔊 SOUND IDS
+local SOUND_ID = "rbxassetid://9083627113" 
+local BANK_MUSIC_ID = "rbxassetid://0" -- < 🎵 PASTE YOUR BANK MUSIC ID HERE
+
+-- ⚠️ IMPORTANT: Exact name of your game music in SoundService
+local GAME_THEME_NAME = "GameTheme" 
+
+-- 3. MUSIC SETUP
+local gameThemeSound = SoundService:FindFirstChild(GAME_THEME_NAME)
+if not gameThemeSound then
+	warn("⚠️ Bank Script: Could not find sound named '"..GAME_THEME_NAME.."' in SoundService.")
+end
+
+-- Create Internal Bank Music
+local bankMusic = Instance.new("Sound")
+bankMusic.Name = "BankMusic_Internal"
+bankMusic.SoundId = BANK_MUSIC_ID
+bankMusic.Volume = 0.5 
+bankMusic.Looped = true
+bankMusic.Parent = SoundService 
+
+-- 🛡️ TRACKING VARIABLES
+local currentFadeTween = nil      
+local hiddenGuis = {}             
+
+-- 4. SETUP CLICK DETECTOR
 local detector = Instance.new("TextButton")
 detector.Name = "OutsideDetector"
 detector.Parent = myScreenGui
@@ -67,7 +91,7 @@ detector.ZIndex = mainWindow.ZIndex - 1
 detector.Visible = false
 detector.Active = true 
 
--- 4. MONEY VARIABLES
+-- 5. MONEY VARIABLES
 local leaderstats = player:WaitForChild("leaderstats", 10)
 local cash = nil
 if leaderstats then
@@ -75,30 +99,51 @@ if leaderstats then
 end
 
 -- ============================================================================
--- 📊 ABBREVIATION SYSTEM (The Fix)
+-- 🛠️ HELPER: PLAY SFX SAFELY
+-- ============================================================================
+local function playSfx(soundId, volume)
+	local s = Instance.new("Sound")
+	s.SoundId = soundId
+	s.Volume = volume or 0.5
+	s.Parent = openButton -- Parent to GUI ensures reliability
+	s:Play()
+	game.Debris:AddItem(s, 3)
+end
+
+-- ============================================================================
+-- 👁️ FUNCTION: SMART HIDE OTHER GUIS
+-- ============================================================================
+local function toggleOtherGuis(shouldHide)
+	if shouldHide then
+		hiddenGuis = {} 
+		for _, gui in pairs(playerGui:GetChildren()) do
+			if gui:IsA("ScreenGui") and gui ~= myScreenGui and gui.Enabled == true then
+				gui.Enabled = false
+				table.insert(hiddenGuis, gui)
+			end
+		end
+	else
+		for _, gui in pairs(hiddenGuis) do
+			if gui and gui.Parent then 
+				gui.Enabled = true
+			end
+		end
+		hiddenGuis = {} 
+	end
+end
+
+-- ============================================================================
+-- 📊 ABBREVIATION SYSTEM
 -- ============================================================================
 local SUFFIXES = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
 
 local function formatNumber(n)
-	-- Convert to number just in case
 	n = tonumber(n)
 	if not n then return "0" end
-
-	-- If less than 1000, just show it (e.g. 950)
-	if n < 1000 then 
-		return tostring(math.floor(n)) 
-	end
-
-	-- Calculate index (log1000)
+	if n < 1000 then return tostring(math.floor(n)) end
 	local i = math.floor(math.log(n, 1000))
-	
-	-- Calculate the divisor (1000^i)
 	local v = math.pow(1000, i)
-	
-	-- Get the suffix
-	local suffix = SUFFIXES[i] or "?" -- Fallback if way too huge
-	
-	-- Return formatted string (e.g. 1.52M)
+	local suffix = SUFFIXES[i] or "?"
 	return string.format("%.2f%s", n / v, suffix)
 end
 
@@ -110,7 +155,9 @@ local function updateDisplay()
 	end
 end
 
--- ... (Rest of the script is standard logic) ...
+-- ============================================================================
+-- 🎮 MAIN LOGIC
+-- ============================================================================
 
 local function loadAvatar()
 	local content, isReady = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
@@ -124,21 +171,22 @@ end
 local function setFocusMode(isFocused)
 	detector.Visible = isFocused
 	openButton.Visible = not isFocused 
+	
 	if isFocused then
 		mainWindow.Visible = true
 		if transferFrame then transferFrame.Visible = false end
+		
+		-- 👁️ Hide others
+		toggleOtherGuis(true)
 	else
 		mainWindow.Visible = false
 		if transferFrame then transferFrame.Visible = false end
-	end
-	
-	-- Hide other GUIs
-	for _, gui in pairs(playerGui:GetChildren()) do
-		if gui:IsA("ScreenGui") and gui ~= myScreenGui then
-			gui.Enabled = not isFocused
-		end
+		
+		-- 👁️ Show others
+		toggleOtherGuis(false)
 	end
 
+	-- Lock Movement
 	local character = player.Character
 	if character then
 		local humanoid = character:FindFirstChild("Humanoid")
@@ -149,9 +197,29 @@ local function setFocusMode(isFocused)
 	end
 end
 
--- CONNECTIONS
+-- ============================================================================
+-- 🟢 OPEN LOGIC
+-- ============================================================================
 openButton.MouseButton1Click:Connect(function()
-	local s = Instance.new("Sound", SoundService); s.SoundId = SOUND_ID; s.Volume=0.5; s:Play(); game.Debris:AddItem(s, 2)
+	playSfx(SOUND_ID, 0.5)
+
+	-- 1. STOP FADE OUT (Fixes conflict)
+	if currentFadeTween then
+		currentFadeTween:Cancel()
+		currentFadeTween = nil
+	end
+
+	-- 2. HANDLE MUSIC (Pause Game, Play Bank)
+	if gameThemeSound and gameThemeSound.IsPlaying then
+		gameThemeSound:Pause()
+	end
+	
+	bankMusic.Volume = 0.5 
+	if not bankMusic.IsPlaying then
+		bankMusic:Play()
+	end
+
+	-- 3. UI LOGIC
 	local colorHex = getRandomHex()
 	greetingLabel.Text = "<font color='#" .. colorHex .. "'>" .. player.Name .. "</font>"
 	updateDisplay()
@@ -159,17 +227,39 @@ openButton.MouseButton1Click:Connect(function()
 	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = OPEN_FOV}):Play()
 end)
 
+-- ============================================================================
+-- 🔴 CLOSE LOGIC
+-- ============================================================================
 local function performClose()
 	setFocusMode(false)
 	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = NORMAL_FOV}):Play()
+	
+	-- 4. FADE OUT MUSIC SAFELY
+	if bankMusic.IsPlaying then
+		currentFadeTween = TweenService:Create(bankMusic, TweenInfo.new(1, Enum.EasingStyle.Linear), {Volume = 0})
+		currentFadeTween:Play()
+		
+		currentFadeTween.Completed:Connect(function(playbackState)
+			if playbackState == Enum.PlaybackState.Completed then
+				bankMusic:Stop()
+				if gameThemeSound then
+					gameThemeSound:Resume() 
+				end
+			end
+			currentFadeTween = nil 
+		end)
+	end
 end
 
 closeButton.MouseButton1Click:Connect(function() 
-	local s = Instance.new("Sound", SoundService); s.SoundId = SOUND_ID; s.Volume=0.5; s:Play(); game.Debris:AddItem(s, 2)
+	playSfx(SOUND_ID, 0.5)
 	performClose()
 end) 
 
-detector.MouseButton1Click:Connect(performClose)
+detector.MouseButton1Click:Connect(function()
+	playSfx(SOUND_ID, 0.5) -- Optional: Click sound when clicking outside
+	performClose()
+end)
 
 local function addHover(btn)
 	btn.MouseEnter:Connect(function() TweenService:Create(btn, HOVER_TWEEN, {ImageColor3 = DIM_COLOR}):Play() end)
