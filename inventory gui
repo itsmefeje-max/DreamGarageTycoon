@@ -1,5 +1,5 @@
--- ( LOCAL SCRIPT: Inventory & Background System )
--- ( This script manages the Inventory UI, handles item equipping, and includes a robust visibility system that links Tier Buttons to their respective Background Images, ensuring correct Z-Index layering. )
+-- ( LOCAL SCRIPT: Inventory - GHOST BUTTON FIX )
+-- ( This version REMOVES the StarterGear scan so used items actually disappear from the UI )
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -42,28 +42,20 @@ local closeButton = mainWindow:WaitForChild("CloseButton", 10)
 local tierFrame = myScreenGui:WaitForChild("TierFrame", 10)
 local tierContainer = tierFrame:WaitForChild("TierContainer", 10)
 
--- 🖼️ BACKGROUND SETUP (ROBUST FIX)
+-- 🖼️ BACKGROUND SETUP
 local tierBackgrounds = {}
--- ✅ FIX 1: Use base names only. "Common", not "CommonBG". 
--- This ensures the button name "Common" matches the key in our table later.
 local tierNames = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"}
 
 for _, rarity in ipairs(tierNames) do
-	local bgName = rarity .. "BG" -- Constructs "CommonBG"
-	local bgObj = mainWindow:FindFirstChild(bgName) -- Checks direct child
+	local bgName = rarity .. "BG"
+	local bgObj = mainWindow:FindFirstChild(bgName)
 
 	if bgObj then
-		-- Map the RARITY name (e.g., "Common") to the IMAGE OBJECT
 		tierBackgrounds[rarity] = bgObj
-		
-		-- ✅ FIX 2: ZIndex Auto-Correction
-		-- Forces the image to be exactly 1 layer above the Window Frame
-		-- This fixes the issue where the image is "Visible" but hidden behind the grey box.
 		if bgObj.ZIndex <= mainWindow.ZIndex then
 			bgObj.ZIndex = mainWindow.ZIndex + 1
 		end
-		
-		bgObj.Visible = false -- Start hidden
+		bgObj.Visible = false
 	else
 		warn("⚠️ Inventory Script Warning: Could not find image '" .. bgName .. "' inside InventoryWindow.")
 	end
@@ -123,7 +115,6 @@ end
 -- 🖼️ BACKGROUND UPDATE LOGIC
 -- ============================================================================
 local function updateBackground()
-	-- Loop through our table. Key is "Common", Value is the Image Object.
 	for rarityKey, bgObject in pairs(tierBackgrounds) do
 		if rarityKey == currentTab then
 			bgObject.Visible = true
@@ -134,7 +125,7 @@ local function updateBackground()
 end
 
 -- ============================================================================
--- 🎒 INVENTORY LOGIC
+-- 🎒 INVENTORY LOGIC (FIXED)
 -- ============================================================================
 local function getRarityColor(rarity)
 	if rarity == "Common" then return Color3.fromRGB(150, 150, 150) end
@@ -147,12 +138,12 @@ local function getRarityColor(rarity)
 end
 
 local function updateInventory()
-	-- Clear old items
+	-- 1. Clear old items
 	for _, child in pairs(itemsContainer:GetChildren()) do
 		if child:IsA("GuiButton") then child:Destroy() end
 	end
 
-	-- Scan Player Inventory
+	-- 2. Scan REAL Inventory (Backpack + Character only)
 	local items = {}
 	local function scan(loc)
 		if not loc then return end
@@ -163,12 +154,16 @@ local function updateInventory()
 			end
 		end
 	end
-	scan(player:FindFirstChild("Backpack"))
-	scan(player:FindFirstChild("StarterGear"))
+	
+	-- ✅ ONLY scan where the items actually exist
+	scan(player:FindFirstChild("Backpack")) 
+	scan(player.Character) -- Checks your hands
+	
+	-- ❌ REMOVED: scan(player:FindFirstChild("StarterGear")) 
+	-- This was causing the "Ghost Button" glitch!
 
-	-- Populate List
+	-- 3. Populate List
 	for carName, tool in pairs(items) do
-		-- Safety check if CarStats exists
 		local stats = CarStats and CarStats.Cars and CarStats.Cars[carName]
 
 		if stats and stats.Rarity == currentTab then
@@ -185,7 +180,8 @@ local function updateInventory()
 			btn.AnchorPoint = Vector2.new(0.5, 0.5) 
 			local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = btn
 
-			if player.Character and player.Character:FindFirstChild(tool.Name) then
+			-- Check if it's currently equipped
+			if tool.Parent == player.Character then
 				local stroke = Instance.new("UIStroke")
 				stroke.Color = Color3.new(1,1,1); stroke.Thickness = 3; stroke.Parent = btn
 				btn.Text = carName .. "\n(Equipped)"
@@ -200,10 +196,14 @@ local function updateInventory()
 				local existingTool = char and char:FindFirstChild(tool.Name)
 
 				if existingTool then
+					-- Unequip: Move from Character to Backpack
 					existingTool.Parent = player.Backpack 
 				else
-					local bagTool = player.Backpack:FindFirstChild(tool.Name)
-					if bagTool then bagTool.Parent = char end 
+					-- Equip: Move from Backpack to Character
+					-- Note: Since we scan Backpack & Character, 'tool' is the correct reference
+					if tool.Parent == player.Backpack then
+						tool.Parent = char
+					end
 				end
 				updateInventory()
 			end)
@@ -263,9 +263,9 @@ if tierContainer then
 
 			btn.MouseButton1Click:Connect(function()
 				local s = Instance.new("Sound"); s.SoundId = CLICK_SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 2)
-				currentTab = btn.Name -- e.g., "Uncommon"
+				currentTab = btn.Name 
 
-				updateBackground() -- Matches "Uncommon" to "UncommonBG" image
+				updateBackground() 
 				updateInventory()
 			end)
 		end
