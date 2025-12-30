@@ -1,5 +1,5 @@
 -- ( LOCAL SCRIPT: Universal Sprint - TOGGLE FIX )
--- Features: Toggle Button (Mobile) + Toggle Shift (PC)
+-- Features: Toggle Button (Mobile) + Toggle Shift (PC) + DISABLES WHEN HOLDING ITEMS
 
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
@@ -15,8 +15,7 @@ local SPRINT_SPEED = 26
 local isSprinting = false
 
 -- 1. VISIBILITY SETUP
--- We never disable the ScreenGui (or the script dies). 
--- We only hide the mobile button if the player is on PC.
+-- Only show mobile button if touch is enabled
 if UserInputService.TouchEnabled then
 	button.Visible = true
 else
@@ -29,12 +28,18 @@ local function updateSpeed()
 	if character then
 		local humanoid = character:FindFirstChild("Humanoid")
 		if humanoid then
-			-- If isSprinting is true, set to 26, else set to 16
+			-- 🛑 SAFETY CHECK: If holding a tool, NEVER sprint
+			if character:FindFirstChildWhichIsA("Tool") then
+				humanoid.WalkSpeed = WALK_SPEED -- Force walk speed
+				return
+			end
+
+			-- Normal Logic
 			humanoid.WalkSpeed = isSprinting and SPRINT_SPEED or WALK_SPEED
 		end
 	end
 
-	-- Update Mobile Button Visuals (Even on PC, just in case)
+	-- Update Mobile Button Visuals
 	if isSprinting then
 		button.ImageTransparency = 0.5 -- Dim (Active)
 	else
@@ -42,32 +47,79 @@ local function updateSpeed()
 	end
 end
 
+-- 🛡️ MONITOR TOOLS (The Fix)
+local function setupCharacter(character)
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if not humanoid then return end
+
+	-- Function to check if we are holding something
+	local function checkTools()
+		if character:FindFirstChildWhichIsA("Tool") then
+			-- ✋ PLAYER IS HOLDING A CAR/ITEM
+			isSprinting = false
+			updateSpeed()
+			
+			-- Hide button so they can't try to sprint
+			button.Visible = false
+		else
+			-- ✅ HANDS ARE EMPTY
+			updateSpeed() -- Just to be safe
+			
+			-- Show button again if on Mobile
+			if UserInputService.TouchEnabled then
+				button.Visible = true
+			end
+		end
+	end
+
+	-- Listen for Equipping (ChildAdded) and Unequipping (ChildRemoved)
+	character.ChildAdded:Connect(checkTools)
+	character.ChildRemoved:Connect(checkTools)
+	
+	-- Run once at start in case they spawn with a tool
+	checkTools()
+end
+
 -- ============================================================================
 -- 💻 PC LOGIC (Tap Shift to Toggle)
 -- ============================================================================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end -- Don't run if typing in chat
+	if gameProcessed then return end 
+
+	-- Extra Check: Don't toggle if holding a tool
+	local char = player.Character
+	if char and char:FindFirstChildWhichIsA("Tool") then return end
 
 	if input.KeyCode == Enum.KeyCode.LeftShift then
-		-- FLIP THE SWITCH
 		isSprinting = not isSprinting
 		updateSpeed()
 	end
 end)
 
--- Note: We removed "InputEnded" so you don't stop running when you let go of Shift.
-
 -- ============================================================================
 -- 📱 MOBILE LOGIC (Tap Button to Toggle)
 -- ============================================================================
 button.MouseButton1Click:Connect(function()
-	-- FLIP THE SWITCH
+	-- Extra Check: Don't toggle if holding a tool
+	local char = player.Character
+	if char and char:FindFirstChildWhichIsA("Tool") then return end
+
 	isSprinting = not isSprinting
 	updateSpeed()
 end)
 
 -- 🛡️ SAFETY: Reset on Respawn
-player.CharacterAdded:Connect(function()
+player.CharacterAdded:Connect(function(char)
 	isSprinting = false
-	updateSpeed()
+	-- Reset visibility based on device
+	if UserInputService.TouchEnabled then
+		button.Visible = true
+	else
+		button.Visible = false
+	end
+	
+	setupCharacter(char)
 end)
+
+-- Initial Setup
+if player.Character then setupCharacter(player.Character) end
