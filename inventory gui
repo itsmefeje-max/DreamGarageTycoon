@@ -1,5 +1,5 @@
--- ( LOCAL SCRIPT: Inventory - NORMAL MODE )
--- ( Handles inventory logic, UI animations, and toggles separate Background ImageLabels per Tier )
+-- ( LOCAL SCRIPT: Inventory - MOVEMENT FIX )
+-- ( Removed "OutsideDetector" so you can walk and move camera while inventory is open )
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -42,18 +42,17 @@ local closeButton = mainWindow:WaitForChild("CloseButton", 10)
 local tierFrame = myScreenGui:WaitForChild("TierFrame", 10)
 local tierContainer = tierFrame:WaitForChild("TierContainer", 10)
 
--- 🖼️ BACKGROUND SETUP (Finds CommonBG, RareBG, etc.)
+-- 🖼️ BACKGROUND SETUP
 local tierBackgrounds = {}
 local tierNames = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic"}
 
--- Find and store all background images
 for _, rarity in ipairs(tierNames) do
 	local bgName = rarity .. "BG"
-	local bgObj = mainWindow:FindFirstChild(bgName) -- Look inside InventoryWindow
-
+	local bgObj = mainWindow:FindFirstChild(bgName) 
+	
 	if bgObj then
 		tierBackgrounds[rarity] = bgObj
-		bgObj.Visible = false -- Hide all initially
+		bgObj.Visible = false 
 	end
 end
 
@@ -68,7 +67,7 @@ pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false) 
 local currentTab = "Common" 
 
 -- ============================================================================
--- 1️⃣ UI EFFECTS (Dim & Scale)
+-- 1️⃣ UI EFFECTS
 -- ============================================================================
 local function addDimEffect(btn)
 	btn.MouseEnter:Connect(function()
@@ -94,7 +93,7 @@ end
 local function addScaleEffect(btn)
 	forceSafeCenter(btn)
 	local scale = btn:FindFirstChild("UIScale") or Instance.new("UIScale", btn)
-
+	
 	btn.MouseEnter:Connect(function()
 		local s = Instance.new("Sound"); s.SoundId = HOVER_SOUND_ID; s.Volume = 0.3; s.Parent = SoundService; s:Play(); game.Debris:AddItem(s, 1)
 		btn.ZIndex = 10 
@@ -111,7 +110,6 @@ end
 -- 🖼️ BACKGROUND UPDATE LOGIC
 -- ============================================================================
 local function updateBackground()
-	-- Loop through all known backgrounds and show only the current one
 	for rarity, bgObject in pairs(tierBackgrounds) do
 		if rarity == currentTab then
 			bgObject.Visible = true
@@ -156,7 +154,7 @@ local function updateInventory()
 	-- Populate List
 	for carName, tool in pairs(items) do
 		local stats = CarStats.Cars[carName]
-
+		
 		if stats and stats.Rarity == currentTab then
 			local btn = Instance.new("TextButton")
 			btn.Name = carName
@@ -167,7 +165,7 @@ local function updateInventory()
 			btn.TextColor3 = Color3.new(1,1,1)
 			btn.Font = Enum.Font.FredokaOne
 			btn.TextWrapped = true
-
+			
 			btn.AnchorPoint = Vector2.new(0.5, 0.5) 
 			local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = btn
 
@@ -176,15 +174,15 @@ local function updateInventory()
 				stroke.Color = Color3.new(1,1,1); stroke.Thickness = 3; stroke.Parent = btn
 				btn.Text = carName .. "\n(Equipped)"
 			end
-
+			
 			addScaleEffect(btn)
 
 			btn.MouseButton1Click:Connect(function()
 				local s = Instance.new("Sound"); s.SoundId = EQUIP_SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 1)
-
+				
 				local char = player.Character
 				local existingTool = char and char:FindFirstChild(tool.Name)
-
+				
 				if existingTool then
 					existingTool.Parent = player.Backpack 
 				else
@@ -192,6 +190,8 @@ local function updateInventory()
 					if bagTool then bagTool.Parent = char end 
 				end
 				updateInventory()
+				
+				-- Note: We DO NOT close the menu here anymore, so you can keep equipping things.
 			end)
 		end
 	end
@@ -200,46 +200,39 @@ end
 -- ============================================================================
 -- 🟢 OPEN / CLOSE LOGIC
 -- ============================================================================
-local detector = Instance.new("TextButton")
-detector.Name = "OutsideDetector"
-detector.Parent = myScreenGui
-detector.Size = UDim2.new(1, 0, 1, 0)
-detector.BackgroundTransparency = 1 
-detector.Text = ""
-detector.ZIndex = mainWindow.ZIndex - 1 
-detector.Visible = false
+
+-- [DELETED] OutsideDetector: This was the invisible button blocking your camera.
+-- It has been removed so you can touch the screen to move/look around.
 
 openButton.MouseButton1Click:Connect(function()
 	local s = Instance.new("Sound"); s.SoundId = CLICK_SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 2)
-
+	
 	updateInventory()
-	updateBackground() -- ✅ Ensure correct background is shown on open
-
-	detector.Visible = true
+	updateBackground()
+	
 	mainWindow.Visible = true
 	tierFrame.Visible = true
 	openButton.Visible = false
-
+	
 	-- Hide other GUI elements
 	for _, obj in pairs(myScreenGui:GetDescendants()) do
 		if obj:IsA("GuiButton") and not obj:IsDescendantOf(mainWindow) and not obj:IsDescendantOf(tierFrame) and obj ~= openButton then
 			obj.Visible = false
 		end
 	end
-
+	
 	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = OPEN_FOV}):Play()
 end)
 
 local function performClose()
-	detector.Visible = false
 	mainWindow.Visible = false
 	tierFrame.Visible = false
 	openButton.Visible = true
-
+	
 	for _, obj in pairs(myScreenGui:GetDescendants()) do
 		if obj:IsA("GuiButton") then obj.Visible = true end
 	end
-
+	
 	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = NORMAL_FOV}):Play()
 end
 
@@ -247,7 +240,6 @@ closeButton.MouseButton1Click:Connect(function()
 	local s = Instance.new("Sound"); s.SoundId = CLICK_SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 2)
 	performClose() 
 end)
-detector.MouseButton1Click:Connect(function() performClose() end)
 
 -- ============================================================================
 -- 🔘 TIER TABS
@@ -257,12 +249,12 @@ if tierContainer then
 		if btn:IsA("GuiButton") then
 			addScaleEffect(btn)
 			addDimEffect(btn)
-
+			
 			btn.MouseButton1Click:Connect(function()
 				local s = Instance.new("Sound"); s.SoundId = CLICK_SOUND_ID; s.Volume=0.5; s.Parent=SoundService; s:Play(); game.Debris:AddItem(s, 2)
 				currentTab = btn.Name
-
-				updateBackground() -- ✅ Switch background immediately
+				
+				updateBackground() 
 				updateInventory()
 			end)
 		end
