@@ -1,7 +1,7 @@
 -- ( SERVER SCRIPT: TycoonEconomy - SUFFIX UPDATE )
 -- Handles: Car Earnings Generation & Floating Text (With K/M/B Suffixes)
 
-local ServerStorage = game:GetService("ServerStorage")
+local ServerStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
