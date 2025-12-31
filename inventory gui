@@ -1,5 +1,5 @@
--- ( LOCAL SCRIPT: Inventory - FIXED SOUND BUGS & GUI HIDING )
--- ( Fixes: Music cutting out, Tweens fighting each other, and reliable SFX parenting )
+-- ( LOCAL SCRIPT: Inventory - FIXED COMMON BG & AUTO-HIDE STARTUP )
+-- ( Fixes: CommonBG logic, Sound bugs, and automatically hides the GUI if left open in Studio )
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -26,14 +26,14 @@ local HOVER_SOUND_ID = "rbxassetid://6895079853"
 
 -- 🎵 MUSIC & SPECIAL SFX
 local SHOP_MUSIC_ID = "rbxassetid://83777726264435" 
-local MYTHIC_SFX_ID = "rbxassetid://9120048710"   
+local MYTHIC_SFX_ID = "rbxassetid://9120048710"    
 
 -- ⚠️ IMPORTANT: Exact name of your game music in SoundService
 local GAME_THEME_NAME = "GameTheme" 
 
 -- 🎨 COLORS
 local NORMAL_COLOR = Color3.fromRGB(255, 255, 255) 
-local DIM_COLOR = Color3.fromRGB(170, 170, 170)     
+local DIM_COLOR = Color3.fromRGB(170, 170, 170)      
 
 -- ============================================================================
 -- 📂 HIERARCHY & MUSIC SETUP
@@ -49,6 +49,12 @@ local closeButton = mainWindow:WaitForChild("CloseButton", 10)
 local tierFrame = myScreenGui:WaitForChild("TierFrame", 10)
 local tierContainer = tierFrame:WaitForChild("TierContainer", 10)
 
+-- 🔒 STARTUP FIX: FORCE HIDE UI
+-- This ensures that if you left the GUI Visible in Studio, it hides automatically on play.
+if mainWindow then mainWindow.Visible = false end
+if tierFrame then tierFrame.Visible = false end
+openButton.Visible = true -- Ensure the open button is always seen at start
+
 -- Setup Music References
 local gameThemeSound = SoundService:FindFirstChild(GAME_THEME_NAME)
 if not gameThemeSound then
@@ -61,11 +67,11 @@ shopMusic.Name = "ShopMusic_Internal"
 shopMusic.SoundId = SHOP_MUSIC_ID
 shopMusic.Volume = 0.5 
 shopMusic.Looped = true
-shopMusic.Parent = SoundService -- Keeping persistent music in SoundService is fine
+shopMusic.Parent = SoundService 
 
 -- 🛡️ TRACKING VARIABLES
-local currentFadeTween = nil      -- Tracks the active music fade
-local hiddenGuis = {}             -- Stores GUIs we hid
+local currentFadeTween = nil      
+local hiddenGuis = {}             
 
 -- 🖼️ BACKGROUND SETUP
 local tierBackgrounds = {}
@@ -77,10 +83,12 @@ for _, rarity in ipairs(tierNames) do
 
 	if bgObj then
 		tierBackgrounds[rarity] = bgObj
+		bgObj.Visible = false 
+
+		-- Ensure background layer is correct (optional safety)
 		if bgObj.ZIndex <= mainWindow.ZIndex then
 			bgObj.ZIndex = mainWindow.ZIndex + 1
 		end
-		bgObj.Visible = false
 	else
 		warn("⚠️ Inventory Script Warning: Could not find image '" .. bgName .. "' inside InventoryWindow.")
 	end
@@ -103,7 +111,6 @@ local function playSfx(soundId, volume)
 	local s = Instance.new("Sound")
 	s.SoundId = soundId
 	s.Volume = volume or 0.5
-	-- Parent to the PlayerGui or the Script's Parent to ensure it plays reliably for the client
 	s.Parent = openButton 
 	s:Play()
 	game.Debris:AddItem(s, 3)
@@ -162,7 +169,7 @@ local function addScaleEffect(btn)
 	local scale = btn:FindFirstChild("UIScale") or Instance.new("UIScale", btn)
 
 	btn.MouseEnter:Connect(function()
-		playSfx(HOVER_SOUND_ID, 0.3) -- Uses new Safe SFX function
+		playSfx(HOVER_SOUND_ID, 0.3) 
 		btn.ZIndex = 10 
 		TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1.2}):Play()
 	end)
@@ -178,6 +185,7 @@ end
 -- ============================================================================
 local function updateBackground()
 	for rarityKey, bgObject in pairs(tierBackgrounds) do
+		-- Strict toggle: If tab matches, show it. If not, hide it.
 		if rarityKey == currentTab then
 			bgObject.Visible = true
 		else
@@ -187,7 +195,7 @@ local function updateBackground()
 end
 
 -- ============================================================================
--- 🎒 INVENTORY LOGIC (FIXED)
+-- 🎒 INVENTORY LOGIC
 -- ============================================================================
 local function getRarityColor(rarity)
 	if rarity == "Common" then return Color3.fromRGB(150, 150, 150) end
@@ -261,13 +269,13 @@ local function updateInventory()
 end
 
 -- ============================================================================
--- 🟢 OPEN / CLOSE LOGIC (WITH FIXED MUSIC TWEENS)
+-- 🟢 OPEN / CLOSE LOGIC
 -- ============================================================================
 
 openButton.MouseButton1Click:Connect(function()
 	playSfx(CLICK_SOUND_ID, 0.5)
 
-	-- 1. STOP FADE OUT (Fixes the "Instance" bug)
+	-- 1. STOP FADE OUT
 	if currentFadeTween then
 		currentFadeTween:Cancel()
 		currentFadeTween = nil
@@ -285,6 +293,8 @@ openButton.MouseButton1Click:Connect(function()
 
 	-- 3. UI LOGIC
 	toggleOtherGuis(true)
+
+	currentTab = "Common" 
 	updateInventory()
 	updateBackground()
 
@@ -319,14 +329,13 @@ local function performClose()
 		currentFadeTween:Play()
 
 		currentFadeTween.Completed:Connect(function(playbackState)
-			-- Only stop if the tween actually finished (wasn't cancelled)
 			if playbackState == Enum.PlaybackState.Completed then
 				shopMusic:Stop()
 				if gameThemeSound then
 					gameThemeSound:Resume() 
 				end
 			end
-			currentFadeTween = nil -- Reset tracker
+			currentFadeTween = nil 
 		end)
 	end
 end
@@ -337,7 +346,7 @@ closeButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================================
--- 🔘 TIER TABS (WITH MYTHIC SFX)
+-- 🔘 TIER TABS
 -- ============================================================================
 if tierContainer then
 	for _, btn in pairs(tierContainer:GetChildren()) do
@@ -349,7 +358,7 @@ if tierContainer then
 
 				-- 🔊 MYTHIC SFX CHECK
 				if btn.Name == "Mythic" then
-					playSfx(MYTHIC_SFX_ID, 1) -- Louder for Mythic
+					playSfx(MYTHIC_SFX_ID, 1) 
 				else
 					playSfx(CLICK_SOUND_ID, 0.5)
 				end
@@ -365,6 +374,3 @@ end
 
 addDimEffect(openButton)
 addDimEffect(closeButton)
-
-tierFrame.Visible = false
-mainWindow.Visible = false
