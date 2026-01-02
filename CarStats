@@ -1,49 +1,158 @@
 -- ( MODULE SCRIPT: CarStats )
--- Adjusted for "Hook & Wall" Gameplay Loop + Riva is now Common.
+-- Central database for Vehicle Rarity, Price, and Earnings (CPS).
+-- LOCATION: ReplicatedStorage > CarStats
 
 local CarStats = {}
 
 CarStats.Cars = {
-	-- 1. DELTA (The Starter)
-	-- Instant earning, gets them moving.
+	-- ========================================================================
+	-- ⚪ COMMON TIERS (The Starter Hook)
+	-- Purpose: Fast progression to get players addicted.
+	-- ========================================================================
 	["Delta"] = { 
+		Name = "Delta",
 		CPS = 1,
 		Rarity = "Common",
 		Price = 0 
 	},
-
-	-- 2. ATOM (The Hook)
-	-- Cheap ($150) with a nice boost (3x). Players feel "rich" quickly.
 	["Atom"] = { 
+		Name = "Atom",
 		CPS = 3, 
 		Rarity = "Common",
 		Price = 150 
 	},
-
-	-- 3. WINDSOR (The Grind Starts)
-	-- Price jumps to $1,200. This is the first "work for it" car.
 	["Windsor"] = { 
+		Name = "Windsor",
 		CPS = 8, 
 		Rarity = "Common",
 		Price = 1200 
 	},
-
-	-- 4. SENATOR (The Mid-Tier)
-	-- Good steady income.
 	["Senator"] = { 
+		Name = "Senator",
 		CPS = 22, 
 		Rarity = "Common",
 		Price = 5500 
 	},
-
-	-- 5. RIVA (The King of Commons)
-	-- ✅ CHANGED TO COMMON.
-	-- This is the ultimate goal before moving to Rare cars.
-	-- High price ($18k) but massive payout (55 CPS).
 	["Riva"] = { 
+		Name = "Riva",
 		CPS = 55, 
 		Rarity = "Common", 
-		Price = 18000 
+		Price = 18000 -- The first "wall" players hit.
+	},
+
+	-- ========================================================================
+	-- 🟢 UNCOMMON TIERS (The Bridge)
+	-- Purpose: Keeps them playing after Riva. "I can afford this soon."
+	-- ========================================================================
+	["Vapid-Sadler"] = {
+		Name = "Vapid Sadler", 
+		CPS = 85,
+		Rarity = "Uncommon",
+		Price = 35000
+	},
+	["2021-Toyota-Hilux"] = {
+		Name = "Toyota Hilux (2021)",
+		CPS = 100,
+		Rarity = "Uncommon",
+		Price = 45000
+	},
+	["2022-Nissan-Skyline"] = {
+		Name = "Nissan Skyline V37",
+		CPS = 120,
+		Rarity = "Uncommon",
+		Price = 55000
+	},
+	["2019-Ford-Everest-Titanium"] = {
+		Name = "Ford Everest Titanium",
+		CPS = 145,
+		Rarity = "Uncommon",
+		Price = 70000
+	},
+	["2021-Ford-Expedition-Platinum"] = {
+		Name = "Ford Expedition Platinum",
+		CPS = 165,
+		Rarity = "Uncommon",
+		Price = 85000
+	},
+
+	-- ========================================================================
+	-- 🔵 RARE TIERS (The Mid-Game)
+	-- Purpose: Enthusiast cars. Players start feeling "Rich".
+	-- ========================================================================
+	["Mercedes-Benz-A-Class"] = {
+		Name = "Mercedes-Benz A-Class",
+		CPS = 220,
+		Rarity = "Rare",
+		Price = 120000
+	},
+	["Honda-Civic-Type-R"] = {
+		Name = "Honda Civic Type R (FK8)",
+		CPS = 260,
+		Rarity = "Rare",
+		Price = 150000
+	},
+	["2023-Chevrolet"] = {
+		Name = "Corvette C8 Stingray",
+		CPS = 310,
+		Rarity = "Rare",
+		Price = 190000
+	},
+	["Toyota-Supra-Mk4"] = {
+		Name = "Toyota Supra Mk4 (A80)",
+		CPS = 360,
+		Rarity = "Rare",
+		Price = 230000
+	},
+
+	-- ========================================================================
+	-- 🟣 EPIC TIERS (High Performance)
+	-- Purpose: The first major grind. Robux spending becomes tempting here.
+	-- ========================================================================
+	["BMW-i8"] = {
+		Name = "BMW i8 Roadster",
+		CPS = 520,
+		Rarity = "Epic",
+		Price = 380000
+	},
+	["Nissan-GTR"] = {
+		Name = "Nissan GT-R (R35)",
+		CPS = 680,
+		Rarity = "Epic",
+		Price = 500000
+	},
+	["Porsche-911"] = {
+		Name = "Porsche 911 Turbo S",
+		CPS = 850,
+		Rarity = "Epic",
+		Price = 650000
+	},
+
+	-- ========================================================================
+	-- 🟡 LEGENDARY TIERS (The Dream Cars)
+	-- Purpose: Massive status symbols.
+	-- ========================================================================
+	["Mclaren-Senna"] = {
+		Name = "McLaren Senna",
+		CPS = 1600,
+		Rarity = "Legendary",
+		Price = 1350000 -- $1.35 Million
+	},
+	["Ferrari-Daytona"] = {
+		Name = "Ferrari Daytona SP3",
+		CPS = 2400,
+		Rarity = "Legendary",
+		Price = 2600000 -- $2.6 Million
+	},
+
+	-- ========================================================================
+	-- 🔴 MYTHIC TIERS (The Endgame)
+	-- Purpose: The "Chase Item." Keeps players grinding for days/weeks.
+	-- ========================================================================
+	["Bugatti-Chiron"] = {
+		Name = "Bugatti Chiron",
+		CPS = 5500, -- Rewards the player heavily for reaching the end
+		Rarity = "Mythic",
+		Price = 6500000 -- $6.5 Million
 	}
 }
 
