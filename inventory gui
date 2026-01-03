@@ -1,5 +1,6 @@
--- ( LOCAL SCRIPT: Inventory - FIXED COMMON BG & AUTO-HIDE STARTUP )
--- ( Fixes: CommonBG logic, Sound bugs, and automatically hides the GUI if left open in Studio )
+-- ( LOCAL SCRIPT: Inventory - FIXED VISIBILITY & ROBUST CHECK )
+-- Fixes: "Invisible Item" glitch. Now detects cars even if named "Delta" instead of "Delta Item".
+-- Includes: CommonBG logic, Sound bugs, and Studio Auto-Hide.
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -26,7 +27,7 @@ local HOVER_SOUND_ID = "rbxassetid://6895079853"
 
 -- 🎵 MUSIC & SPECIAL SFX
 local SHOP_MUSIC_ID = "rbxassetid://83777726264435" 
-local MYTHIC_SFX_ID = "rbxassetid://9120048710"    
+local MYTHIC_SFX_ID = "rbxassetid://9120048710"  
 
 -- ⚠️ IMPORTANT: Exact name of your game music in SoundService
 local GAME_THEME_NAME = "GameTheme" 
@@ -50,10 +51,9 @@ local tierFrame = myScreenGui:WaitForChild("TierFrame", 10)
 local tierContainer = tierFrame:WaitForChild("TierContainer", 10)
 
 -- 🔒 STARTUP FIX: FORCE HIDE UI
--- This ensures that if you left the GUI Visible in Studio, it hides automatically on play.
 if mainWindow then mainWindow.Visible = false end
 if tierFrame then tierFrame.Visible = false end
-openButton.Visible = true -- Ensure the open button is always seen at start
+openButton.Visible = true 
 
 -- Setup Music References
 local gameThemeSound = SoundService:FindFirstChild(GAME_THEME_NAME)
@@ -85,7 +85,6 @@ for _, rarity in ipairs(tierNames) do
 		tierBackgrounds[rarity] = bgObj
 		bgObj.Visible = false 
 
-		-- Ensure background layer is correct (optional safety)
 		if bgObj.ZIndex <= mainWindow.ZIndex then
 			bgObj.ZIndex = mainWindow.ZIndex + 1
 		end
@@ -94,11 +93,12 @@ for _, rarity in ipairs(tierNames) do
 	end
 end
 
--- Module Loading
+-- Module Loading (CRITICAL FOR FIX)
 local CarStats = nil
-pcall(function()
+local success, err = pcall(function()
 	CarStats = require(ReplicatedStorage:WaitForChild("CarStats", 5))
 end)
+if not success then warn("❌ CRITICAL: CarStats could not be loaded! Inventory will be broken.") end
 
 pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false) end)
 
@@ -144,21 +144,15 @@ end
 -- 1️⃣ UI EFFECTS
 -- ============================================================================
 local function addDimEffect(btn)
-	btn.MouseEnter:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = DIM_COLOR}):Play()
-	end)
-	btn.MouseLeave:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = NORMAL_COLOR}):Play()
-	end)
+	btn.MouseEnter:Connect(function() TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = DIM_COLOR}):Play() end)
+	btn.MouseLeave:Connect(function() TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = NORMAL_COLOR}):Play() end)
 end
 
 local function forceSafeCenter(btn)
 	if btn.AnchorPoint ~= Vector2.new(0.5, 0.5) then
 		btn.Position = btn.Position + UDim2.new(
-			btn.Size.X.Scale * 0.5, 
-			btn.Size.X.Offset * 0.5, 
-			btn.Size.Y.Scale * 0.5, 
-			btn.Size.Y.Offset * 0.5
+			btn.Size.X.Scale * 0.5, btn.Size.X.Offset * 0.5, 
+			btn.Size.Y.Scale * 0.5, btn.Size.Y.Offset * 0.5
 		)
 		btn.AnchorPoint = Vector2.new(0.5, 0.5)
 	end
@@ -185,7 +179,6 @@ end
 -- ============================================================================
 local function updateBackground()
 	for rarityKey, bgObject in pairs(tierBackgrounds) do
-		-- Strict toggle: If tab matches, show it. If not, hide it.
 		if rarityKey == currentTab then
 			bgObject.Visible = true
 		else
@@ -195,7 +188,7 @@ local function updateBackground()
 end
 
 -- ============================================================================
--- 🎒 INVENTORY LOGIC
+-- 🎒 INVENTORY LOGIC (THE FIX)
 -- ============================================================================
 local function getRarityColor(rarity)
 	if rarity == "Common" then return Color3.fromRGB(150, 150, 150) end
@@ -208,17 +201,39 @@ local function getRarityColor(rarity)
 end
 
 local function updateInventory()
+	-- Clear old buttons
 	for _, child in pairs(itemsContainer:GetChildren()) do
 		if child:IsA("GuiButton") then child:Destroy() end
 	end
 
 	local items = {}
+
+	-- 🔍 ROBUST SCAN FUNCTION
+	-- This checks if the tool matches ANY valid car in CarStats
 	local function scan(loc)
 		if not loc then return end
 		for _, tool in pairs(loc:GetChildren()) do
-			if tool:IsA("Tool") and tool.Name:match(" Item") then
-				local cleanName = tool.Name:gsub(" Item", "")
-				items[cleanName] = tool
+			if tool:IsA("Tool") and CarStats and CarStats.Cars then
+				local cleanName = nil
+				
+				-- 1. Try Exact Name (e.g. "Delta")
+				if CarStats.Cars[tool.Name] then
+					cleanName = tool.Name
+				
+				-- 2. Try Removing " Item" (e.g. "Delta Item")
+				elseif tool.Name:match(" Item$") then
+					local temp = tool.Name:gsub(" Item", "")
+					if CarStats.Cars[temp] then cleanName = temp end
+				
+				-- 3. Try Removing "Item" (e.g. "DeltaItem")
+				elseif tool.Name:match("Item$") then
+					local temp = tool.Name:gsub("Item", "")
+					if CarStats.Cars[temp] then cleanName = temp end
+				end
+				
+				if cleanName then
+					items[cleanName] = tool
+				end
 			end
 		end
 	end
@@ -226,8 +241,9 @@ local function updateInventory()
 	scan(player:FindFirstChild("Backpack")) 
 	scan(player.Character)
 
+	-- Create Buttons
 	for carName, tool in pairs(items) do
-		local stats = CarStats and CarStats.Cars and CarStats.Cars[carName]
+		local stats = CarStats.Cars[carName]
 
 		if stats and stats.Rarity == currentTab then
 			local btn = Instance.new("TextButton")
@@ -355,7 +371,6 @@ if tierContainer then
 			addDimEffect(btn)
 
 			btn.MouseButton1Click:Connect(function()
-
 				-- 🔊 MYTHIC SFX CHECK
 				if btn.Name == "Mythic" then
 					playSfx(MYTHIC_SFX_ID, 1) 
@@ -364,7 +379,6 @@ if tierContainer then
 				end
 
 				currentTab = btn.Name 
-
 				updateBackground() 
 				updateInventory()
 			end)
