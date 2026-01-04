@@ -1,5 +1,6 @@
--- ( SERVER SCRIPT: PadController - FIXED PICKUP )
--- Refactored to specifically look in 'CarTools' for reliable item retrieval.
+-- [[ SERVER SCRIPT: PadController (Final Verified Fix) ]]
+-- -- Indicating what the script is for: Handles placing and picking up cars.
+-- FIX: Added StarterGear saving to prevent car loss.
 
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
@@ -12,9 +13,8 @@ local PROMPT_RANGE = 14
 -- =================
 
 -- 📂 FOLDER REFERENCES
--- We specifically reference CarTools so we can find the items reliably.
 local CarModels = ServerStorage:WaitForChild("CarModels")
-local CarTools = ServerStorage:WaitForChild("CarTools") -- ✅ Added this line
+local CarTools = ServerStorage:WaitForChild("CarTools")
 local TycoonFolder = Workspace:WaitForChild("Tycoons") 
 
 local function getPlotFolder(obj)
@@ -96,7 +96,7 @@ local function setupPad(padObject)
 	local isProcessing = false
 
 	-- =========================================================================
-	-- 🟢 PLACE LOGIC
+	-- 🟢 PLACE LOGIC (UNCHANGED)
 	-- =========================================================================
 	placePrompt.Triggered:Connect(function(player)
 		if isProcessing then return end
@@ -140,7 +140,6 @@ local function setupPad(padObject)
 					Debris:AddItem(sClone, 2)
 				end
 
-				-- Ghost Mode
 				for _, part in pairs(placedCar:GetDescendants()) do
 					if part:IsA("BasePart") then
 						part.Anchored = true; part.CanCollide = false
@@ -161,7 +160,7 @@ local function setupPad(padObject)
 	end)
 
 	-- =========================================================================
-	-- 🔴 PICKUP LOGIC (REFACTORED)
+	-- 🔴 PICKUP LOGIC (SECURED)
 	-- =========================================================================
 	pickupPrompt.Triggered:Connect(function(player)
 		if isProcessing then return end
@@ -180,10 +179,8 @@ local function setupPad(padObject)
 			local carName = carToRemove.Name
 			local foundTool = nil
 			
-			-- ✅ Names to check (e.g. "Delta Item", "Delta", "DeltaItem")
 			local possibleNames = {carName .. " Item", carName .. "Item", carName}
 
-			-- 🔎 SEARCH 1: Check CarTools folder directly (FAST & RELIABLE)
 			for _, name in ipairs(possibleNames) do
 				local t = CarTools:FindFirstChild(name)
 				if t and t:IsA("Tool") then
@@ -192,7 +189,6 @@ local function setupPad(padObject)
 				end
 			end
 
-			-- 🔎 SEARCH 2: Fallback to StarterPack if not in CarTools
 			if not foundTool then
 				for _, name in ipairs(possibleNames) do
 					local t = StarterPack:FindFirstChild(name)
@@ -203,9 +199,15 @@ local function setupPad(padObject)
 				end
 			end
 
-			-- ✅ GIVE TOOL
+			-- ✅ GIVE TOOL (FIXED HERE)
 			if foundTool then
+				-- 1. Give to Backpack (Hand)
 				foundTool.Parent = player.Backpack
+				
+				-- 2. Give to StarterGear (Save System) -- THIS WAS MISSING
+				local gearClone = foundTool:Clone()
+				gearClone.Parent = player.StarterGear
+
 				carToRemove:Destroy()
 
 				occupiedVal.Value = false
@@ -221,12 +223,11 @@ local function setupPad(padObject)
 					sClone:Play()
 					Debris:AddItem(sClone, 2)
 				end
-				print("♻️ Picked up: " .. carName .. " (Tool Given)")
+				print("♻️ Picked up: " .. carName .. " (Saved)")
 			else
 				warn("❌ CRITICAL: Could not find tool for '" .. carName .. "' in ServerStorage.CarTools!")
 			end
 		else
-			-- Reset if car was already gone
 			occupiedVal.Value = false
 			placePrompt.Enabled = true
 			pickupPrompt.Enabled = false
@@ -237,7 +238,6 @@ local function setupPad(padObject)
 	end)
 end
 
--- 🔄 LOOP
 for _, plot in pairs(TycoonFolder:GetChildren()) do
 	local padsFolder = plot:FindFirstChild("Pads")
 	if padsFolder then
