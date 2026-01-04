@@ -1,14 +1,13 @@
--- [[ SERVER SIDE: TycoonDataHandler (Ultra Secured) ]]
--- -- Indicating what the script is for: Handles saving/loading player data with retry logic and error protection.
--- PREVENTS DATA LOSS using pcalls and retry loops.
+-- [[ SERVER SIDE: TycoonDataHandler (Final + Data Integrity Fix) ]]
+-- -- Indicating what the script is for: Handles saving/loading player data.
+-- FIX: Prevents overwriting save files if the initial load failed.
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
-local RunService = game:GetService("RunService")
 
 -- 🔒 DATABASE CONFIG
-local DATA_KEY = "TycoonData_Economy_V3" -- Matches your V3 key
+local DATA_KEY = "TycoonData_Economy_V3" 
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 -- 📂 STORAGE
@@ -17,9 +16,10 @@ local STARTER_CAR_NAME = "Delta Item"
 
 -- 🛠️ HELPER
 local function giveTool(player, toolName)
+	-- Safety check: Ensure player is still there
 	if not player or not player.Parent then return end
-	if player.Backpack:FindFirstChild(toolName) or player.StarterGear:FindFirstChild(toolName) then return end
 	
+	if player.Backpack:FindFirstChild(toolName) or player.StarterGear:FindFirstChild(toolName) then return end
 	local tool = CarTools:FindFirstChild(toolName)
 	if tool then
 		tool:Clone().Parent = player.Backpack
@@ -27,39 +27,30 @@ local function giveTool(player, toolName)
 	end
 end
 
--- 📥 JOIN (LOADING DATA)
+-- 📥 JOIN
 Players.PlayerAdded:Connect(function(player)
-	local leaderstats = Instance.new("Folder")
-	leaderstats.Name = "leaderstats"
-	leaderstats.Parent = player
-
-	-- 🏦 "Cash" is your BANK BALANCE (Tycoon deposits here)
-	local bank = Instance.new("IntValue")
-	bank.Name = "Cash"
-	bank.Parent = leaderstats
-
-	-- 💵 "Wallet" is your SPENDING MONEY
-	local wallet = Instance.new("IntValue")
-	wallet.Name = "Wallet"
-	wallet.Value = 0
-	wallet.Parent = leaderstats
+	local leaderstats = Instance.new("Folder"); leaderstats.Name = "leaderstats"; leaderstats.Parent = player
+	local bank = Instance.new("IntValue"); bank.Name = "Cash"; bank.Parent = leaderstats
+	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Value = 0; wallet.Parent = leaderstats
 
 	local playerKey = "User_" .. player.UserId
 	local savedData = nil
-	local success, errorMessage = pcall(function()
-		savedData = PlayerDataStore:GetAsync(playerKey)
+	
+	-- Try to load data
+	local success, errorMessage = pcall(function() 
+		savedData = PlayerDataStore:GetAsync(playerKey) 
 	end)
 
 	if success then
+		-- ✅ MARK AS SAFE TO SAVE later
+		player:SetAttribute("DataLoaded", true)
+
 		if savedData then
 			print("✅ Loaded Data for " .. player.Name)
 			bank.Value = savedData.Bank or 0
 			wallet.Value = savedData.Wallet or 0
-
 			if savedData.Inventory then
-				for _, tName in pairs(savedData.Inventory) do 
-					giveTool(player, tName) 
-				end
+				for _, tName in pairs(savedData.Inventory) do giveTool(player, tName) end
 			end
 		else
 			print("🆕 New Player: " .. player.Name)
@@ -68,19 +59,27 @@ Players.PlayerAdded:Connect(function(player)
 			giveTool(player, STARTER_CAR_NAME) 
 		end
 	else
-		warn("⚠️ FAILED TO LOAD DATA for " .. player.Name .. ": " .. tostring(errorMessage))
-		-- Security: You might want to kick them here to prevent them playing with 0 stats, 
-		-- but for now we just warn so they can play.
+		-- 🛑 LOAD FAILED: Do NOT mark 'DataLoaded'.
+		-- This prevents the save function from wiping their data later.
+		warn("⚠️ DATA LOAD ERROR for " .. player.Name .. ": " .. tostring(errorMessage))
+		warn("🛑 SAFETY ENGAGED: Saving disabled for this session to prevent data loss.")
+		
+		-- Optional: Kick them to prevent confusion
+		-- player:Kick("Data failed to load. Please rejoin to protect your save file.") 
 	end
 end)
 
--- 💾 LEAVE (SAVING DATA - ULTRA SECURED)
+-- 💾 LEAVE
 local function savePlayerData(player)
-	-- 1. Validate Player
+	-- 🛑 SAFETY CHECK: Did data load correctly?
+	if not player:GetAttribute("DataLoaded") then
+		warn("🛑 ABORTING SAVE for " .. player.Name .. " (Data did not load correctly on join).")
+		return
+	end
+
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return end
 
-	-- 2. Prepare Data
 	local inventoryTable = {}
 	if player:FindFirstChild("StarterGear") then
 		for _, tool in pairs(player.StarterGear:GetChildren()) do
@@ -97,47 +96,30 @@ local function savePlayerData(player)
 	}
 
 	local playerKey = "User_" .. player.UserId
-
-	-- 3. RETRY LOGIC (The Security Feature)
+	
+	-- Retry Logic
 	local attempts = 0
-	local maxAttempts = 3
 	local success = false
-	local err = nil
-
 	repeat
-		attempts = attempts + 1
-		success, err = pcall(function()
+		attempts += 1
+		success = pcall(function()
 			PlayerDataStore:SetAsync(playerKey, dataToSave)
 		end)
+		if not success then task.wait(6) end
+	until success or attempts >= 3
 
-		if not success then
-			warn("⚠️ Save Failed for " .. player.Name .. " (Attempt " .. attempts .. "): " .. tostring(err))
-			task.wait(6) -- Wait 6 seconds (API Limit) before retrying
-		end
-	until success or attempts >= maxAttempts
-
-	-- 4. Final Status
 	if success then
-		print("💾 SECURED SAVE: Data stored for " .. player.Name)
+		print("💾 Saved Data for " .. player.Name)
 	else
-		warn("❌ CRITICAL: Could not save data for " .. player.Name .. " after 3 attempts!")
+		warn("⚠️ CRITICAL: Data Save Failed for " .. player.Name)
 	end
 end
 
--- Connect Save on Leave
 Players.PlayerRemoving:Connect(savePlayerData)
 
--- 🛡️ SERVER SHUTDOWN PROTECTION
-game:BindToClose(function()
-	print("🛑 Server Shutting Down - Saving all players...")
-	
-	-- Create a thread for every player to save simultaneously
-	for _, player in pairs(Players:GetPlayers()) do
-		task.spawn(function()
-			savePlayerData(player)
-		end)
-	end
-	
-	-- Force the server to wait 5 seconds so the saves can finish
-	task.wait(5)
+game:BindToClose(function() 
+	for _, p in pairs(Players:GetPlayers()) do 
+		savePlayerData(p) 
+	end 
+	task.wait(3) 
 end)
