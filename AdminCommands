@@ -1,6 +1,8 @@
--- ( SERVER SCRIPT: AdminCommands - CASE INSENSITIVE FIX )
+-- [[ SERVER SCRIPT: AdminCommands (Everything Update) ]]
+-- -- Indicating what the script is for: Admin commands to give items or "everything".
 -- Usage: /give <target> <item_name> [amount]
--- Example: /give @s delta (Finds "Delta Item")
+-- Example: /give @s delta
+-- Special: /give @s everything (Gives one of EVERY tool)
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -49,7 +51,7 @@ local function getTargets(speaker, selector)
 end
 
 -- ============================================================================
--- 🎒 ITEM GIVING LOGIC (CASE INSENSITIVE FIX)
+-- 🎒 ITEM GIVING LOGIC
 -- ============================================================================
 local function findToolCaseInsensitive(itemName)
 	local targetName = itemName:lower()
@@ -57,32 +59,21 @@ local function findToolCaseInsensitive(itemName)
 	for _, tool in pairs(CarTools:GetChildren()) do
 		if tool:IsA("Tool") then
 			local toolName = tool.Name:lower()
-
-			-- Check 1: Exact Match (e.g. "vapid" == "vapid")
+			-- Check 1: Exact Match
 			if toolName == targetName then return tool end
-
-			-- Check 2: With " item" suffix (e.g. "vapid" matches "vapid item")
+			-- Check 2: With " item" suffix
 			if toolName == targetName .. " item" then return tool end
-
-			-- Check 3: With "item" suffix (e.g. "vapid" matches "vapiditem")
+			-- Check 3: With "item" suffix
 			if toolName == targetName .. "item" then return tool end
 		end
 	end
 	return nil
 end
 
-local function giveItem(player, itemName, quantity)
-	-- Use the new case-insensitive search
-	local tool = findToolCaseInsensitive(itemName)
-
-	if tool then
-		for i = 1, quantity do
-			tool:Clone().Parent = player.Backpack
-			tool:Clone().Parent = player.StarterGear
-		end
-		return true, tool.Name
-	else
-		return false, nil
+local function giveItem(player, tool, quantity)
+	for i = 1, quantity do
+		tool:Clone().Parent = player.Backpack
+		tool:Clone().Parent = player.StarterGear
 	end
 end
 
@@ -112,13 +103,32 @@ Players.PlayerAdded:Connect(function(player)
 			return
 		end
 
-		for _, target in pairs(targetPlayers) do
-			local success, realName = giveItem(target, itemName, amount)
-			if success then
-				print("✅ Gave " .. amount .. "x [" .. realName .. "] to " .. target.Name)
-			else
-				warn("❌ Could not find item: " .. itemName)
+		-- 🌟 SPECIAL "EVERYTHING" COMMAND 🌟
+		if itemName:lower() == "everything" or itemName:lower() == "all" then
+			print("🎁 GIVING EVERYTHING to targets...")
+			
+			for _, target in pairs(targetPlayers) do
+				local count = 0
+				for _, tool in pairs(CarTools:GetChildren()) do
+					if tool:IsA("Tool") then
+						giveItem(target, tool, 1)
+						count = count + 1
+					end
+				end
+				print("✅ Gave " .. count .. " items to " .. target.Name)
 			end
+			return
+		end
+
+		-- 📦 NORMAL ITEM COMMAND
+		local tool = findToolCaseInsensitive(itemName)
+		if tool then
+			for _, target in pairs(targetPlayers) do
+				giveItem(target, tool, amount)
+				print("✅ Gave " .. amount .. "x [" .. tool.Name .. "] to " .. target.Name)
+			end
+		else
+			warn("❌ Could not find item: " .. itemName)
 		end
 	end)
 end)
