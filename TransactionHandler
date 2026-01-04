@@ -1,26 +1,28 @@
--- ( SERVER SIDE: Withdraw Money from Bank -> Wallet )
--- FIXED: Matches TycoonDataHandler names ("Cash" = Bank, "Wallet" = Pocket)
+-- [[ SERVER SIDE: TransactionHandler (Final Verified Fix) ]]
+-- -- Indicating what the script is for: Withdraws money with exploit checks.
+-- FIX: Added type checking for 'amount'.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent")
 
--- ⏳ COOLDOWN CONFIG (Set to 0.5s to prevent spam, NOT 3 hours)
+-- ⏳ COOLDOWN CONFIG
 local COOLDOWN_TIME = 0.5 
 local cooldowns = {} 
 
 withdrawEvent.OnServerEvent:Connect(function(player, amount)
-	-- 1. Validate Amount
-	if not amount or amount <= 0 then return end
+	-- 🛡️ SECURITY FIX: Type Check
+	if type(amount) ~= "number" then 
+		return -- Silently reject bad input
+	end
 
-	-- Prevent decimals/glitches
+	-- 1. Validate Amount
+	if amount <= 0 then return end
 	amount = math.floor(amount) 
 
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return end
 
-	-- 2. DEFINE VARIABLES (SYNCED WITH TYCOONDATAHANDLER)
-	-- "Cash" is your BANK (Where tycoon money goes)
-	-- "Wallet" is your POCKET (Where you withdraw to)
+	-- 2. DEFINE VARIABLES
 	local bank = leaderstats:FindFirstChild("Cash")   
 	local wallet = leaderstats:FindFirstChild("Wallet") 
 
@@ -33,21 +35,21 @@ withdrawEvent.OnServerEvent:Connect(function(player, amount)
 			return 
 		end
 
-		-- 4. CHECK BALANCE (Do they have enough in the BANK?)
+		-- 4. CHECK BALANCE
 		if bank.Value >= amount then
 
 			-- 5. DO THE TRANSFER
-			bank.Value = bank.Value - amount   -- Take from Bank (Cash)
-			wallet.Value = wallet.Value + amount -- Give to Wallet
+			bank.Value = bank.Value - amount   
+			wallet.Value = wallet.Value + amount 
 
 			-- Update Cooldown
 			cooldowns[player.UserId] = os.time()
 
-			print("✅ Success! Withdrew $" .. amount .. " from Bank to Wallet.")
+			print("✅ Success! Withdrew $" .. amount .. " for " .. player.Name)
 		else
-			warn("❌ Insufficient Funds. Bank: " .. bank.Value .. " | Needed: " .. amount)
+			warn("❌ Insufficient Funds for " .. player.Name)
 		end
 	else
-		warn("❌ CRITICAL: Missing 'Cash' or 'Wallet' in leaderstats for " .. player.Name)
+		warn("❌ CRITICAL: Missing stats for " .. player.Name)
 	end
 end)
