@@ -1,76 +1,93 @@
---StarterCharacterScripts
--- ( LOCAL SCRIPT: Universal NPC Gaze )
--- Handles head tracking for ALL NPCs in the "NPCS" folder automatically.
+-- [[ LOCAL SCRIPT: UniversalNPCGaze (Super Slow Motion) ]]
+-- -- Indicating what the script is for: Handles cinematic, heavy-weight head tracking.
+-- TUNED FOR: Extremely slow, realistic head turns.
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
-local npcFolder = Workspace:WaitForChild("NPCS") -- 📁 This is where your NPCs live
+local npcFolder = Workspace:WaitForChild("NPCS") -- 📁 Ensure your NPCs are in this folder
 
--- ⚙️ GLOBAL CONFIG
-local MAX_DISTANCE = 40       -- Studs: How close you must be
-local TURN_SPEED = 0.1        -- Smoothness
-local HEAD_LIMIT = 60         -- Max rotation angle
+-- ⚙️ SUPER SLOW TUNING
+local MAX_DISTANCE = 35        -- Studs: Range to start looking
+local RETURN_SPEED = 0.005     -- (Was 0.02) Extremely slow drift back (Heavy feel)
+local TRACK_SPEED = 0.02       -- (Was 0.05) Gentle turn when looking at you
+local SHOULDER_LIMIT = 85      -- Degrees: Angle where they stop looking
+local VERTICAL_LIMIT = 40      -- Degrees: Max Up/Down angle
 
--- 🛠️ MATH HELPER
-local function limitAngle(angle, limit)
-	return math.clamp(angle, math.rad(-limit), math.rad(limit))
+-- 🛠️ MATH HELPER: Normalize angles
+local function getGoalCFrame(rootPart, lookAtPos)
+	-- Convert global position to local space relative to the NPC
+	local relativePos = rootPart.CFrame:PointToObjectSpace(lookAtPos)
+
+	-- 1. BEHIND CHECK: If Z is positive, the player is behind.
+	if relativePos.Z > 0.5 then
+		return CFrame.new() -- Return straight
+	end
+
+	-- 2. CALCULATE ANGLES
+	local xAngle = math.atan2(relativePos.Y, -relativePos.Z)
+	local yAngle = math.atan2(-relativePos.X, -relativePos.Z)
+
+	-- 3. SHOULDER CHECK: Stop if turning head too far
+	if math.abs(math.deg(yAngle)) > SHOULDER_LIMIT then
+		return CFrame.new() -- Return straight
+	end
+
+	-- 4. CLAMP VERTICAL
+	xAngle = math.clamp(xAngle, math.rad(-VERTICAL_LIMIT), math.rad(VERTICAL_LIMIT))
+
+	-- 5. RETURN GOAL (Dampen X slightly for realism)
+	return CFrame.Angles(xAngle / 1.5, yAngle, 0)
 end
 
--- 🔄 MAIN LOOP
+-- 🔄 MAIN RENDER LOOP
 RunService.RenderStepped:Connect(function()
 	local myCharacter = player.Character
 	if not myCharacter then return end
 	local myHead = myCharacter:FindFirstChild("Head")
 	if not myHead then return end
 
-	-- 🔎 LOOP THROUGH EVERY NPC
 	for _, npc in pairs(npcFolder:GetChildren()) do
-		
-		-- Check if it's a valid R15 NPC with all parts
 		if npc:IsA("Model") and npc:FindFirstChild("Head") and npc:FindFirstChild("UpperTorso") then
-			
 			local head = npc.Head
-			local neck = head:FindFirstChild("Neck") -- Neck is usually inside Head
+			local neck = head:FindFirstChild("Neck")
 			local torso = npc.UpperTorso
-			
+
 			if neck then
-				-- 1. SETUP: Store original C0 if we haven't yet
-				-- We use an Attribute so we don't lose the original position
+				-- Setup Original Position (Once)
 				if not neck:GetAttribute("OriginalC0") then
 					neck:SetAttribute("OriginalC0", neck.C0)
 				end
 				local originalC0 = neck:GetAttribute("OriginalC0")
 
-				-- 2. CALCULATE DISTANCE
+				-- Calculate Logic
 				local dist = (head.Position - myHead.Position).Magnitude
-				local goalCFrame = CFrame.new()
+				local targetCFrame = CFrame.new()
+				local currentAlpha = RETURN_SPEED 
 
+				-- Active Tracking
 				if dist < MAX_DISTANCE then
-					-- A. Direction to player
-					local lookPos = myHead.Position
-					local torsoCFrame = torso.CFrame
-					local lookVector = torsoCFrame:PointToObjectSpace(lookPos)
+					local potentialGoal = getGoalCFrame(torso, myHead.Position)
 
-					-- B. Calculate Angles
-					local xAngle = math.atan2(lookVector.Y, -lookVector.Z)
-					local yAngle = math.atan2(-lookVector.X, -lookVector.Z)
-
-					-- C. Limit Angles (Prevent broken necks)
-					xAngle = limitAngle(xAngle, HEAD_LIMIT) / 1.5 
-					yAngle = limitAngle(yAngle, HEAD_LIMIT)       
-
-					-- D. Create Goal Rotation
-					goalCFrame = CFrame.Angles(xAngle, yAngle, 0)
+					if potentialGoal == CFrame.new() then
+						-- Player is in range but behind/out of angle -> Slow Return
+						targetCFrame = CFrame.new()
+						currentAlpha = RETURN_SPEED 
+					else
+						-- Player is in valid view -> Smooth Track
+						targetCFrame = potentialGoal
+						currentAlpha = TRACK_SPEED
+					end
 				else
-					-- Reset if far away
-					goalCFrame = CFrame.Angles(0, 0, 0)
+					-- Player is far away -> Slow Return
+					targetCFrame = CFrame.new()
+					currentAlpha = RETURN_SPEED
 				end
 
-				-- 3. ANIMATE
-				neck.C0 = neck.C0:Lerp(originalC0 * goalCFrame, TURN_SPEED)
+				-- ANIMATE: Soft Lerp
+				neck.C0 = neck.C0:Lerp(originalC0 * targetCFrame, currentAlpha)
 			end
 		end
 	end
