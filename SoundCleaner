@@ -1,0 +1,40 @@
+-- sound cleaner for console 
+-- [[ SERVER SCRIPT: SoundCleaner ]]
+-- Indicating what the script is for: Scans game for broken/placeholder sounds and deletes them.
+
+local ServerStorage = game:GetService("ServerStorage")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+print("🧹 SoundCleaner: Starting scan...")
+
+-- 🚫 List of Bad IDs to remove
+local BAD_IDS = {
+	["rbxassetid://0"] = true,        -- The main cause of your red spam
+	["http://www.roblox.com/asset/?id=0"] = true,
+	["rbxassetid://188608071"] = true, -- Old/Broken Climb sound
+	["rbxassetid://201887209"] = true, -- Old/Broken Jump sound
+}
+
+local function cleanContainer(container)
+	-- Look at everything inside the folder
+	for _, desc in pairs(container:GetDescendants()) do
+		if desc:IsA("Sound") then
+			-- Check if ID is in our bad list OR is just "0"
+			if BAD_IDS[desc.SoundId] or desc.SoundId == "0" or desc.SoundId == "" then
+				-- Warn console so you know what was deleted (optional)
+				-- print("🗑️ Removing broken sound: " .. desc.Name .. " in " .. desc.Parent.Name)
+				desc:Destroy()
+			end
+		end
+	end
+end
+
+-- 1. Clean your Car Models (The main source)
+if ServerStorage:FindFirstChild("CarModels") then cleanContainer(ServerStorage.CarModels) end
+if ServerStorage:FindFirstChild("CarTools") then cleanContainer(ServerStorage.CarTools) end
+
+-- 2. Clean Workspace (Cars already placed)
+cleanContainer(Workspace)
+
+print("✨ SoundCleaner: Done! Console should be cleaner.")
