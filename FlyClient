@@ -1,0 +1,160 @@
+-- [[ LOCAL SCRIPT: FlyClient (Advanced V3) ]]
+-- FEATURES: Mobile Support, Smooth Banking, Modern Physics, No-Clip.
+-- CONTROLS: 
+-- [PC] WASD: Move | SPACE: Up | CTRL: Down | SHIFT: Speed Boost | X: Stop
+-- [Mobile] Stick: Move | Buttons: Up/Down/Stop
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- ⚙️ SETTINGS
+local SPEED_NORMAL = 50
+local SPEED_BOOST = 120
+local SMOOTHNESS = 0.2 -- Lower is smoother (0.1 - 0.5)
+local BANK_ANGLE = 15 -- How much to tilt when turning
+
+-- 🛠️ STATE
+local isFlying = true
+local currentSpeed = SPEED_NORMAL
+local moveVector = Vector3.zero
+
+-- 📱 MOBILE GUI SETUP
+local flyGui = nil
+if UserInputService.TouchEnabled then
+	flyGui = Instance.new("ScreenGui")
+	flyGui.Name = "FlyUI"
+	flyGui.Parent = player.PlayerGui
+	
+	local function createBtn(text, pos, color)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, 70, 0, 70)
+		btn.Position = pos
+		btn.BackgroundColor3 = color
+		btn.Text = text
+		btn.TextSize = 20
+		btn.Font = Enum.Font.FredokaOne
+		btn.TextColor3 = Color3.new(1,1,1)
+		btn.Parent = flyGui
+		local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 10); corner.Parent = btn
+		return btn
+	end
+
+	local upBtn = createBtn("⬆️", UDim2.new(0.85, 0, 0.6, 0), Color3.fromRGB(85, 170, 255))
+	local downBtn = createBtn("⬇️", UDim2.new(0.85, 0, 0.72, 0), Color3.fromRGB(85, 170, 255))
+	local stopBtn = createBtn("❌", UDim2.new(0.85, 0, 0.45, 0), Color3.fromRGB(255, 85, 85))
+
+	-- Mobile Input Handling
+	upBtn.MouseButton1Down:Connect(function() moveVector = Vector3.new(0,1,0) end)
+	upBtn.MouseButton1Up:Connect(function() moveVector = Vector3.zero end)
+	downBtn.MouseButton1Down:Connect(function() moveVector = Vector3.new(0,-1,0) end)
+	downBtn.MouseButton1Up:Connect(function() moveVector = Vector3.zero end)
+	stopBtn.MouseButton1Click:Connect(function() 
+		-- Fire a fake input to trigger the stop function
+		character:SetAttribute("ForceStopFly", true) 
+	end)
+end
+
+-- 🔗 PHYSICS SETUP (Modern Constraints)
+local attachment = Instance.new("Attachment", rootPart)
+
+local alignPos = Instance.new("LinearVelocity")
+alignPos.Attachment0 = attachment
+alignPos.MaxForce = math.huge
+alignPos.VectorVelocity = Vector3.zero
+alignPos.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+alignPos.Parent = rootPart
+
+local alignRot = Instance.new("AlignOrientation")
+alignRot.Attachment0 = attachment
+alignRot.Mode = Enum.OrientationAlignmentMode.OneAttachment
+alignRot.RigidityEnabled = false -- Smooth rotation
+alignRot.Responsiveness = 20
+alignRot.Parent = rootPart
+
+-- 🚫 ANIMATION & COLLISION
+humanoid.PlatformStand = true
+local originalCollision = {}
+for _, part in pairs(character:GetDescendants()) do
+	if part:IsA("BasePart") and part.CanCollide then
+		originalCollision[part] = true
+		part.CanCollide = false
+	end
+end
+
+-- 🔁 LOOP
+local function update(dt)
+	if not isFlying or not character.Parent or not rootPart.Parent then return end
+	if character:GetAttribute("ForceStopFly") then stopFlying(); return end
+
+	-- 1. INPUT HANDLING
+	local controlModule = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
+	local inputMove = controlModule:GetMoveVector() -- Works on Mobile Stick & WASD!
+
+	-- Vertical Logic (PC)
+	local yAxis = 0
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then yAxis = 1 end
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then yAxis = -1 end
+	
+	-- Vertical Logic (Mobile Override)
+	if moveVector.Y ~= 0 then yAxis = moveVector.Y end
+
+	-- Speed Boost (Shift)
+	currentSpeed = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and SPEED_BOOST or SPEED_NORMAL
+
+	-- 2. CALCULATE VELOCITY
+	local camCFrame = camera.CFrame
+	-- Calculate direction relative to camera, but flattened on X/Z for movement, Y for elevation
+	local moveDir = (camCFrame.RightVector * inputMove.X) + (camCFrame.LookVector * -inputMove.Z)
+	
+	-- Combine
+	local targetVelocity = (moveDir * currentSpeed) + Vector3.new(0, yAxis * currentSpeed, 0)
+	
+	-- 3. APPLY PHYSICS
+	alignPos.VectorVelocity = alignPos.VectorVelocity:Lerp(targetVelocity, SMOOTHNESS)
+	
+	-- 4. ORIENTATION (Look where camera looks + Bank)
+	local tiltZ = -inputMove.X * BANK_ANGLE -- Tilt sideways when turning
+	local targetCFrame = camCFrame * CFrame.Angles(0, 0, math.rad(tiltZ))
+	alignRot.CFrame = targetCFrame
+end
+
+-- 🛑 STOP FUNCTION
+function stopFlying()
+	if not isFlying then return end
+	isFlying = false
+	
+	-- Cleanup Physics
+	if alignPos then alignPos:Destroy() end
+	if alignRot then alignRot:Destroy() end
+	if attachment then attachment:Destroy() end
+	if flyGui then flyGui:Destroy() end
+
+	-- Restore Character
+	humanoid.PlatformStand = false
+	character:SetAttribute("ForceStopFly", nil)
+	
+	for part, _ in pairs(originalCollision) do
+		if part and part.Parent then part.CanCollide = true end
+	end
+	
+	-- Kill Script
+	script:Destroy()
+end
+
+-- INPUT LISTENER (PC Toggle)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.X then
+		stopFlying()
+	end
+end)
+
+RunService.RenderStepped:Connect(update)
