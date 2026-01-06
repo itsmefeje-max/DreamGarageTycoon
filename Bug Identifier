@@ -1,0 +1,127 @@
+-- [[ SERVER SCRIPT: MegaTycoonVerifier ]]
+-- -- Indicating what the script is for: Performs a deep-scan "Health Check" on all plots (1-8+).
+-- TRIGGERS: Runs automatically on Server Close, or manually via Chat Command "/verify".
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- ⚙️ CONFIGURATION
+local TYCOON_FOLDER_NAME = "Tycoons"
+local ADMIN_USER_IDS = {
+	[5512860740] = true, -- Your ID (Add others if needed)
+}
+
+-- 📋 THE "PERFECT PLOT" SCHEMA
+-- The script will check every plot to ensure these exact items exist.
+local REQUIRED_STRUCTURE = {
+	{Name = "Owner", Class = "StringValue"},
+	{Name = "PendingEarnings", Class = "IntValue"}, -- or NumberValue
+	{Name = "SpawnPoint", Class = "BasePart"},
+	{Name = "ClaimEarnings", Class = "BasePart"},
+	{Name = "Pads", Class = "Folder"},
+}
+
+-- 📋 NESTED CHECKS (Advanced)
+-- Checks specific paths: "NormalGarage" -> "GarageInformation" -> etc.
+local NESTED_CHECKS = {
+	{"NormalGarage", "GarageInformation", "OwnerLabel", "Owner"}, -- The Garage Sign Text
+}
+
+-- ============================================================================
+-- 🕵️ THE VERIFICATION LOGIC
+-- ============================================================================
+local function RunMegaVerification(source)
+	print(" ")
+	print("🛑 STARTING MEGA VERIFICATION (" .. source .. ") 🛑")
+	print("---------------------------------------------------------------")
+
+	local tycoonFolder = Workspace:FindFirstChild(TYCOON_FOLDER_NAME)
+	if not tycoonFolder then
+		warn("❌ CRITICAL FAIL: 'Tycoons' folder is MISSING from Workspace!")
+		return
+	end
+
+	local plots = tycoonFolder:GetChildren()
+	local totalErrors = 0
+	local totalPlots = 0
+
+	-- 1. LOOP THROUGH ALL PLOTS
+	for _, plot in pairs(plots) do
+		totalPlots += 1
+		local plotErrors = {}
+
+		-- A. Check Basic Structure
+		for _, req in pairs(REQUIRED_STRUCTURE) do
+			local obj = plot:FindFirstChild(req.Name)
+			if not obj then
+				table.insert(plotErrors, "MISSING: " .. req.Name)
+			elseif not obj:IsA(req.Class) and req.Class ~= "BasePart" then
+				-- Note: BasePart check is loose (Part, MeshPart, etc.)
+				table.insert(plotErrors, "WRONG TYPE: " .. req.Name .. " is " .. obj.ClassName .. " (Expected " .. req.Class .. ")")
+			end
+		end
+
+		-- B. Check Nested Structure (Garage Signs)
+		-- Only check garage if the plot actually has one loaded (optional check)
+		if plot:FindFirstChild("NormalGarage") then
+			for _, pathArray in pairs(NESTED_CHECKS) do
+				local current = plot
+				local trace = ""
+				for i, nodeName in ipairs(pathArray) do
+					current = current:FindFirstChild(nodeName)
+					trace = trace .. (i > 1 and " > " or "") .. nodeName
+					if not current then
+						table.insert(plotErrors, "BROKEN PATH: " .. trace)
+						break
+					end
+				end
+			end
+		end
+
+		-- C. Report Card
+		if #plotErrors == 0 then
+			print("✅ " .. plot.Name .. ": PERFECT.")
+		else
+			totalErrors += 1
+			warn("⚠️ " .. plot.Name .. " HAS ISSUES:")
+			for _, err in pairs(plotErrors) do
+				warn("   - " .. err)
+			end
+		end
+	end
+
+	print("---------------------------------------------------------------")
+	if totalErrors == 0 then
+		print("🌟 VERIFICATION COMPLETE: ALL " .. totalPlots .. " PLOTS ARE HEALTHY! 🌟")
+	else
+		warn("❌ VERIFICATION FAILED: Found errors in " .. totalErrors .. " plots.")
+	end
+	print(" ")
+end
+
+-- ============================================================================
+-- 🎮 TRIGGERS
+-- ============================================================================
+
+-- 1. CHAT TRIGGER (The "Click Test Once")
+-- Type "/verify" in chat to run it instantly.
+Players.PlayerAdded:Connect(function(player)
+	player.Chatted:Connect(function(msg)
+		if ADMIN_USER_IDS[player.UserId] and msg:lower() == "/verify" then
+			RunMegaVerification("Manual Command by " .. player.Name)
+		end
+	end)
+end)
+
+-- 2. SERVER CLOSE TRIGGER (The "Console Close Mega Verification")
+-- Runs automatically when the server shuts down.
+game:BindToClose(function()
+	RunMegaVerification("Server Shutdown BindToClose")
+	task.wait(2) -- Force server to wait 2 seconds to ensure logs print
+end)
+
+-- 3. AUTO-RUN ON STARTUP (Optional, for instant feedback in Studio)
+task.delay(5, function()
+	RunMegaVerification("Startup Check")
+end)
