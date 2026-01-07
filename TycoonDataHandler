@@ -1,5 +1,5 @@
--- [[ SERVER SIDE: TycoonDataHandler (Final Merged Version) ]]
--- -- Indicating what the script is for: Handles saving/loading player data with UpdateAsync protection, Anti-Wipe, and Pending Earnings recovery.
+-- [[ SERVER SIDE: TycoonDataHandler (Sign Restoration Edition) ]]
+-- -- Indicating what the script is for: Saves pending money and PUTS IT BACK ON THE SIGN when you rejoin.
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -12,7 +12,7 @@ local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 -- 📂 STORAGE
 local CarTools = ServerStorage:WaitForChild("CarTools") 
-local TycoonFolder = Workspace:WaitForChild("Tycoons") -- Ensure this matches your Workspace Folder Name!
+local TycoonFolder = Workspace:WaitForChild("Tycoons") 
 local STARTER_CAR_NAME = "Delta Item" 
 
 -- 🛠️ HELPER: Give items safely
@@ -27,7 +27,7 @@ local function giveTool(player, toolName)
 	end
 end
 
--- 🛠️ HELPER: Find Player Plot (Safety Net)
+-- 🛠️ HELPER: Find Player Plot
 local function findPlayerPlot(player)
 	-- 1. Check Attribute
 	local plotName = player:GetAttribute("OccupiedPlot")
@@ -42,6 +42,25 @@ local function findPlayerPlot(player)
 		end
 	end
 	return nil
+end
+
+-- 🛠️ HELPER: Push Money to Plot (The Magic Function)
+local function pushMoneyToPlot(player)
+	local amount = player:GetAttribute("RestoredPending")
+	if not amount or amount <= 0 then return end
+
+	local plot = findPlayerPlot(player)
+	if plot then
+		local pendingVal = plot:FindFirstChild("PendingEarnings")
+		if pendingVal then
+			-- Add the saved money back to the sign!
+			pendingVal.Value = pendingVal.Value + amount
+			
+			-- Clear the memory attribute so we don't duplicate it
+			player:SetAttribute("RestoredPending", 0)
+			print("💰 Restored $" .. amount .. " to " .. player.Name .. "'s Tycoon Sign.")
+		end
+	end
 end
 
 -- 📥 JOIN LOGIC
@@ -69,10 +88,14 @@ Players.PlayerAdded:Connect(function(player)
 				for _, tName in pairs(savedData.Inventory) do giveTool(player, tName) end
 			end
 			
-			-- 💰 RESTORE PENDING EARNINGS
+			-- 🛑 PENDING MONEY LOGIC (Sign Restoration)
 			if savedData.PendingEarnings and savedData.PendingEarnings > 0 then
-				wallet.Value = wallet.Value + savedData.PendingEarnings
-				print("💰 Restored " .. savedData.PendingEarnings .. " pending cash to " .. player.Name)
+				-- Store it in memory first
+				player:SetAttribute("RestoredPending", savedData.PendingEarnings)
+				print("⏳ Found pending cash. Waiting for plot...")
+				
+				-- Check if plot is already assigned
+				pushMoneyToPlot(player)
 			end
 		else
 			print("🆕 New Player: " .. player.Name)
@@ -84,9 +107,14 @@ Players.PlayerAdded:Connect(function(player)
 		warn("⚠️ DATA LOAD ERROR: " .. tostring(errorMessage))
 		player:Kick("Data failed to load. Please rejoin.")
 	end
+
+	-- 👂 Listen for when they get a plot (if they haven't yet)
+	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(function()
+		pushMoneyToPlot(player)
+	end)
 end)
 
--- 💾 LEAVE LOGIC (UPDATED)
+-- 💾 LEAVE LOGIC
 local function savePlayerData(player)
 	if not player:GetAttribute("DataLoaded") then return end
 
@@ -102,10 +130,18 @@ local function savePlayerData(player)
 
 	-- 💰 CAPTURE PENDING EARNINGS
 	local currentPending = 0
+	
+	-- 1. Check the Plot (Sign)
 	local plot = findPlayerPlot(player)
 	if plot then
 		local pendingVal = plot:FindFirstChild("PendingEarnings")
 		if pendingVal then currentPending = pendingVal.Value end
+	end
+	
+	-- 2. Check Memory (In case they left before the plot loaded)
+	local memoryPending = player:GetAttribute("RestoredPending") or 0
+	if memoryPending > 0 then
+		currentPending = currentPending + memoryPending
 	end
 
 	local playerKey = "User_" .. player.UserId
@@ -115,7 +151,7 @@ local function savePlayerData(player)
 				Bank = leaderstats.Cash.Value,
 				Wallet = leaderstats.Wallet.Value,
 				Inventory = inventoryTable,
-				PendingEarnings = currentPending -- Safe!
+				PendingEarnings = currentPending -- Saves whatever is on the sign OR in memory
 			}
 		end)
 	end)
