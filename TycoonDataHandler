@@ -12,14 +12,12 @@ local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 -- 📂 STORAGE
 local CarTools = ServerStorage:WaitForChild("CarTools") 
-local TycoonFolder = Workspace:WaitForChild("Tycoons") -- CHECK NAME: Ensure your folder is named "Tycoons" or "TycoonFolder"
-local STARTER_CAR_NAME = "Delta Item" -- Your specific starter item
+local TycoonFolder = Workspace:WaitForChild("Tycoons") -- Ensure this matches your Workspace Folder Name!
+local STARTER_CAR_NAME = "Delta Item" 
 
 -- 🛠️ HELPER: Give items safely
 local function giveTool(player, toolName)
 	if not player or not player.Parent then return end
-
-	-- Check both Backpack and StarterGear so we don't give duplicates
 	if player.Backpack:FindFirstChild(toolName) or player.StarterGear:FindFirstChild(toolName) then return end
 
 	local tool = CarTools:FindFirstChild(toolName)
@@ -29,16 +27,14 @@ local function giveTool(player, toolName)
 	end
 end
 
--- 🛠️ HELPER: Find Player Plot (New Safety Function)
--- This ensures we find the plot to save pending money, even if attributes fail.
+-- 🛠️ HELPER: Find Player Plot (Safety Net)
 local function findPlayerPlot(player)
-	-- 1. Check Attribute (Fastest)
+	-- 1. Check Attribute
 	local plotName = player:GetAttribute("OccupiedPlot")
 	if plotName and TycoonFolder:FindFirstChild(plotName) then
 		return TycoonFolder[plotName]
 	end
-
-	-- 2. Fallback: Search manually
+	-- 2. Fallback Search
 	for _, plot in pairs(TycoonFolder:GetChildren()) do
 		local ownerVal = plot:FindFirstChild("Owner") 
 		if ownerVal and (ownerVal.Value == player or ownerVal.Value == player.Name) then
@@ -50,7 +46,6 @@ end
 
 -- 📥 JOIN LOGIC
 Players.PlayerAdded:Connect(function(player)
-	-- 1. Create Leaderstats
 	local leaderstats = Instance.new("Folder"); leaderstats.Name = "leaderstats"; leaderstats.Parent = player
 	local bank = Instance.new("IntValue"); bank.Name = "Cash"; bank.Parent = leaderstats
 	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Value = 0; wallet.Parent = leaderstats
@@ -58,13 +53,11 @@ Players.PlayerAdded:Connect(function(player)
 	local playerKey = "User_" .. player.UserId
 	local savedData = nil
 
-	-- 2. Try to Load Data (Protected Call)
 	local success, errorMessage = pcall(function() 
 		savedData = PlayerDataStore:GetAsync(playerKey) 
 	end)
 
 	if success then
-		-- ✅ SAFETY LOCK ENGAGED
 		player:SetAttribute("DataLoaded", true)
 
 		if savedData then
@@ -72,15 +65,11 @@ Players.PlayerAdded:Connect(function(player)
 			bank.Value = savedData.Bank or 0
 			wallet.Value = savedData.Wallet or 0
 
-			-- Load Inventory
 			if savedData.Inventory then
-				for _, tName in pairs(savedData.Inventory) do 
-					giveTool(player, tName) 
-				end
+				for _, tName in pairs(savedData.Inventory) do giveTool(player, tName) end
 			end
 			
-			-- RESTORE PENDING EARNINGS (The Fix)
-			-- If they crashed with money in the collector, add it to wallet now.
+			-- 💰 RESTORE PENDING EARNINGS
 			if savedData.PendingEarnings and savedData.PendingEarnings > 0 then
 				wallet.Value = wallet.Value + savedData.PendingEarnings
 				print("💰 Restored " .. savedData.PendingEarnings .. " pending cash to " .. player.Name)
@@ -92,73 +81,51 @@ Players.PlayerAdded:Connect(function(player)
 			giveTool(player, STARTER_CAR_NAME) 
 		end
 	else
-		-- 🛑 LOAD FAILED - KICK TO PREVENT DATA LOSS
-		warn("⚠️ DATA LOAD ERROR for " .. player.Name .. ": " .. tostring(errorMessage))
-		player:Kick("Data failed to load. Please rejoin to prevent data loss.")
+		warn("⚠️ DATA LOAD ERROR: " .. tostring(errorMessage))
+		player:Kick("Data failed to load. Please rejoin.")
 	end
 end)
 
--- 💾 LEAVE LOGIC (UPDATED TO UpdateAsync + Pending Check)
+-- 💾 LEAVE LOGIC (UPDATED)
 local function savePlayerData(player)
-	-- 🛑 CRITICAL CHECK: Did data load correctly?
-	if not player:GetAttribute("DataLoaded") then
-		warn("🛑 ABORTING SAVE for " .. player.Name .. " (Data did not load correctly on join).")
-		return 
-	end
+	if not player:GetAttribute("DataLoaded") then return end
 
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return end
 
-	-- 1. Scan Inventory
 	local inventoryTable = {}
 	if player:FindFirstChild("StarterGear") then
 		for _, tool in pairs(player.StarterGear:GetChildren()) do
-			if CarTools:FindFirstChild(tool.Name) then 
-				table.insert(inventoryTable, tool.Name) 
-			end
+			if CarTools:FindFirstChild(tool.Name) then table.insert(inventoryTable, tool.Name) end
 		end
 	end
 
-	-- 2. CAPTURE PENDING EARNINGS (Crucial Fix)
+	-- 💰 CAPTURE PENDING EARNINGS
 	local currentPending = 0
 	local plot = findPlayerPlot(player)
-	
 	if plot then
 		local pendingVal = plot:FindFirstChild("PendingEarnings")
 		if pendingVal then currentPending = pendingVal.Value end
 	end
 
-	-- 3. UPDATE ASYNC (The Safe Way)
 	local playerKey = "User_" .. player.UserId
-	
 	local success, err = pcall(function()
 		PlayerDataStore:UpdateAsync(playerKey, function(oldData)
-			-- Return the new data table to overwrite
-			local newData = {
+			return {
 				Bank = leaderstats.Cash.Value,
 				Wallet = leaderstats.Wallet.Value,
 				Inventory = inventoryTable,
-				PendingEarnings = currentPending -- Save the money inside the collector
+				PendingEarnings = currentPending -- Safe!
 			}
-			return newData
 		end)
 	end)
 
-	if success then
-		print("💾 Saved Data (UpdateAsync) for " .. player.Name)
-	else
-		warn("⚠️ CRITICAL: Data Save Failed for " .. player.Name .. ": " .. tostring(err))
-	end
+	if success then print("💾 Saved Data safely for " .. player.Name)
+	else warn("⚠️ Save Failed: " .. tostring(err)) end
 end
 
--- Connect Events
 Players.PlayerRemoving:Connect(savePlayerData)
-
 game:BindToClose(function() 
-	for _, p in pairs(Players:GetPlayers()) do 
-		task.spawn(function()
-			savePlayerData(p) 
-		end)
-	end 
+	for _, p in pairs(Players:GetPlayers()) do task.spawn(function() savePlayerData(p) end) end 
 	task.wait(3) 
 end)
