@@ -1,10 +1,10 @@
--- [[ SERVER SIDE: TycoonDataHandler (Final Protected Version) ]]
--- -- Indicating what the script is for: Handles saving/loading player data.
--- PROTECTION: Adds a "Safety Lock" so empty/glitched data is NEVER saved over real data.
+-- [[ SERVER SIDE: TycoonDataHandler (Final Merged Version) ]]
+-- -- Indicating what the script is for: Handles saving/loading player data with UpdateAsync protection, Anti-Wipe, and Pending Earnings recovery.
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local Workspace = game:GetService("Workspace")
 
 -- 🔒 DATABASE CONFIG
 local DATA_KEY = "TycoonData_Economy_V3" 
@@ -12,7 +12,8 @@ local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 -- 📂 STORAGE
 local CarTools = ServerStorage:WaitForChild("CarTools") 
-local STARTER_CAR_NAME = "Delta Item"
+local TycoonFolder = Workspace:WaitForChild("Tycoons") -- CHECK NAME: Ensure your folder is named "Tycoons" or "TycoonFolder"
+local STARTER_CAR_NAME = "Delta Item" -- Your specific starter item
 
 -- 🛠️ HELPER: Give items safely
 local function giveTool(player, toolName)
@@ -26,6 +27,25 @@ local function giveTool(player, toolName)
 		tool:Clone().Parent = player.Backpack
 		tool:Clone().Parent = player.StarterGear
 	end
+end
+
+-- 🛠️ HELPER: Find Player Plot (New Safety Function)
+-- This ensures we find the plot to save pending money, even if attributes fail.
+local function findPlayerPlot(player)
+	-- 1. Check Attribute (Fastest)
+	local plotName = player:GetAttribute("OccupiedPlot")
+	if plotName and TycoonFolder:FindFirstChild(plotName) then
+		return TycoonFolder[plotName]
+	end
+
+	-- 2. Fallback: Search manually
+	for _, plot in pairs(TycoonFolder:GetChildren()) do
+		local ownerVal = plot:FindFirstChild("Owner") 
+		if ownerVal and (ownerVal.Value == player or ownerVal.Value == player.Name) then
+			return plot
+		end
+	end
+	return nil
 end
 
 -- 📥 JOIN LOGIC
@@ -44,8 +64,7 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 
 	if success then
-		-- ✅ SAFETY LOCK ENGAGED: We successfully talked to Roblox.
-		-- It is now safe to save this player when they leave.
+		-- ✅ SAFETY LOCK ENGAGED
 		player:SetAttribute("DataLoaded", true)
 
 		if savedData then
@@ -59,6 +78,13 @@ Players.PlayerAdded:Connect(function(player)
 					giveTool(player, tName) 
 				end
 			end
+			
+			-- RESTORE PENDING EARNINGS (The Fix)
+			-- If they crashed with money in the collector, add it to wallet now.
+			if savedData.PendingEarnings and savedData.PendingEarnings > 0 then
+				wallet.Value = wallet.Value + savedData.PendingEarnings
+				print("💰 Restored " .. savedData.PendingEarnings .. " pending cash to " .. player.Name)
+			end
 		else
 			print("🆕 New Player: " .. player.Name)
 			bank.Value = 0
@@ -66,26 +92,24 @@ Players.PlayerAdded:Connect(function(player)
 			giveTool(player, STARTER_CAR_NAME) 
 		end
 	else
-		-- 🛑 LOAD FAILED! 
-		-- We do NOT set "DataLoaded".
-		-- This guarantees that 'savePlayerData' will REFUSE to run later.
+		-- 🛑 LOAD FAILED - KICK TO PREVENT DATA LOSS
 		warn("⚠️ DATA LOAD ERROR for " .. player.Name .. ": " .. tostring(errorMessage))
-		warn("🛑 SAFETY ENGAGED: Saving disabled for this session to protect your specific save file.")
+		player:Kick("Data failed to load. Please rejoin to prevent data loss.")
 	end
 end)
 
--- 💾 LEAVE LOGIC
+-- 💾 LEAVE LOGIC (UPDATED TO UpdateAsync + Pending Check)
 local function savePlayerData(player)
 	-- 🛑 CRITICAL CHECK: Did data load correctly?
 	if not player:GetAttribute("DataLoaded") then
 		warn("🛑 ABORTING SAVE for " .. player.Name .. " (Data did not load correctly on join).")
-		return -- STOP HERE. Do not touch the database.
+		return 
 	end
 
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return end
 
-	-- 1. Scan Inventory (StarterGear is the persistent storage)
+	-- 1. Scan Inventory
 	local inventoryTable = {}
 	if player:FindFirstChild("StarterGear") then
 		for _, tool in pairs(player.StarterGear:GetChildren()) do
@@ -95,30 +119,35 @@ local function savePlayerData(player)
 		end
 	end
 
-	-- 2. Prepare Data Table
-	local dataToSave = {
-		Bank = leaderstats.Cash.Value,
-		Wallet = leaderstats.Wallet.Value,
-		Inventory = inventoryTable
-	}
+	-- 2. CAPTURE PENDING EARNINGS (Crucial Fix)
+	local currentPending = 0
+	local plot = findPlayerPlot(player)
+	
+	if plot then
+		local pendingVal = plot:FindFirstChild("PendingEarnings")
+		if pendingVal then currentPending = pendingVal.Value end
+	end
 
+	-- 3. UPDATE ASYNC (The Safe Way)
 	local playerKey = "User_" .. player.UserId
-
-	-- 3. Retry Logic (Tries 3 times if Roblox is laggy)
-	local attempts = 0
-	local success = false
-	repeat
-		attempts += 1
-		success = pcall(function()
-			PlayerDataStore:SetAsync(playerKey, dataToSave)
+	
+	local success, err = pcall(function()
+		PlayerDataStore:UpdateAsync(playerKey, function(oldData)
+			-- Return the new data table to overwrite
+			local newData = {
+				Bank = leaderstats.Cash.Value,
+				Wallet = leaderstats.Wallet.Value,
+				Inventory = inventoryTable,
+				PendingEarnings = currentPending -- Save the money inside the collector
+			}
+			return newData
 		end)
-		if not success then task.wait(6) end
-	until success or attempts >= 3
+	end)
 
 	if success then
-		print("💾 Saved Data for " .. player.Name)
+		print("💾 Saved Data (UpdateAsync) for " .. player.Name)
 	else
-		warn("⚠️ CRITICAL: Data Save Failed for " .. player.Name)
+		warn("⚠️ CRITICAL: Data Save Failed for " .. player.Name .. ": " .. tostring(err))
 	end
 end
 
@@ -127,7 +156,9 @@ Players.PlayerRemoving:Connect(savePlayerData)
 
 game:BindToClose(function() 
 	for _, p in pairs(Players:GetPlayers()) do 
-		savePlayerData(p) 
+		task.spawn(function()
+			savePlayerData(p) 
+		end)
 	end 
 	task.wait(3) 
 end)
