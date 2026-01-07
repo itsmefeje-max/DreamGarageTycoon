@@ -1,14 +1,5 @@
--- When a player joins
---ServerScriptService
---Finds a free plos
---Marks it as theirs
---Teleports them to that plot’s spawn point
---Does it safely so they don’t fall, clip, or bug
---When the player respawns
---Teleports them back to their own plot again
---When the player leaves
---Resets the plot (owner cleared, cars removed, pads reset)
---Makes it available for the next player
+-- [[ SERVER SCRIPT: TycoonHandler (Persistence Update) ]]
+-- Updated to allow DataHandler to save 'PendingEarnings' before wiping.
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -18,6 +9,12 @@ local TycoonFolder = Workspace:WaitForChild("Tycoons")
 -- 🧹 CLEANUP (Runs when player leaves)
 local function wipePlot(plot)
 	if plot:FindFirstChild("Owner") then plot.Owner.Value = "" end
+	
+	-- 1. RESET PENDING EARNINGS
+	-- We reset it here so the NEXT player starts at 0.
+	local pending = plot:FindFirstChild("PendingEarnings")
+	if pending then pending.Value = 0 end
+
 	if plot:FindFirstChild("PlacedCars") then plot.PlacedCars:ClearAllChildren() end
 	if plot:FindFirstChild("Pads") then
 		for _, padObj in pairs(plot.Pads:GetChildren()) do
@@ -40,55 +37,49 @@ local function assignPlot(player)
 		local ownerVal = plot:FindFirstChild("Owner")
 
 		if ownerVal and ownerVal.Value == "" then
+			-- WIPE FIRST to ensure it's clean for the new user
+			wipePlot(plot)
+			
 			ownerVal.Value = player.Name
 			player:SetAttribute("OccupiedPlot", plot.Name)
 
-			-- This function handles the teleport safely
+			-- Teleport Safety
 			local function onCharacterAdded(character)
 				local spawnPart = plot:WaitForChild("SpawnPoint", 10)
 				local hrp = character:WaitForChild("HumanoidRootPart", 10)
 
 				if spawnPart and hrp then
-					-- 1. PHYSICS LOCK: Stop the character from falling or moving
 					hrp.Anchored = true 
-
-					-- 2. POSITIONING: Move them high enough to clear any grass/props
-					-- We use PivotTo because it moves the whole model correctly
 					character:PivotTo(spawnPart.CFrame + Vector3.new(0, 10, 0))
-
-					-- 3. LOAD DELAY: Give the engine a moment to render the floor
 					task.wait(1.5) 
-
-					-- 4. RELEASE: Character is now safe to walk
 					hrp.Anchored = false
 				end
 			end
 
-			-- Connect to future spawns
 			player.CharacterAdded:Connect(onCharacterAdded)
-
-			-- Handle current spawn (Studio fix)
-			if player.Character then
-				task.spawn(onCharacterAdded, player.Character)
-			end
+			if player.Character then task.spawn(onCharacterAdded, player.Character) end
 
 			return
 		end
 	end
 end
 
--- 👂 EVENTS
 Players.PlayerAdded:Connect(assignPlot)
 
 Players.PlayerRemoving:Connect(function(player)
 	local plotName = player:GetAttribute("OccupiedPlot")
 	if plotName then
 		local plot = TycoonFolder:FindFirstChild(plotName)
-		if plot then wipePlot(plot) end
+		if plot then 
+			-- ⚠️ CRITICAL WAIT: Give TycoonDataHandler 0.5s to grab the money
+			-- before we wipe it to 0.
+			task.wait(0.5)
+			wipePlot(plot) 
+		end
 	end
 end)
 
--- Studio testing loop
+-- Studio testing
 for _, player in pairs(Players:GetPlayers()) do
 	assignPlot(player)
 end
