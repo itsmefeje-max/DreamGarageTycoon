@@ -1,0 +1,138 @@
+-- Indicating what the script is for: Handles Water TP with Raycasting for thin platforms.
+-- FUNCTIONS: Instant Splash, Hierarchy Scanning, Raycast Floor Check.
+-- CLEAN VERSION: No debug prints or console spam.
+
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+
+-- ============================================================================
+-- ⚙️ CONFIGURATION
+-- ============================================================================
+local WATER_FOLDER_NAME = "Water"                
+local SAFE_ZONE_NAME = "SwampAddons"             
+local TARGET_PART_NAME = "ReturnHereIfHitWater" 
+local DELAY_TIME = 0.5                          
+local SAFETY_OFFSET = Vector3.new(0, 3, 0)       
+
+-- 📐 RAYCAST SETTINGS 
+local RAY_LENGTH = 5 -- How far down to check (in studs).
+
+-- 🔊 AUDIO SETTINGS
+local SPLASH_SOUND_ID = "rbxassetid://142431247"
+local SOUND_VOLUME = 1.0
+
+-- 🛡️ STATE MANAGEMENT
+local teleportingPlayers = {} 
+
+-- ============================================================================
+-- 🕵️ SAFETY CHECKER (Overlap + Raycast)
+-- ============================================================================
+local function isPlayerSafe(character)
+	local safeZone = Workspace:FindFirstChild(SAFE_ZONE_NAME)
+
+	if not safeZone then 
+		warn("Script Error: '" .. SAFE_ZONE_NAME .. "' folder/model NOT found in Workspace.") 
+		return false 
+	end
+
+	-- 1️⃣ METHOD A: OVERLAP CHECK (Good for Vines/Bushes)
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Include
+	overlapParams.FilterDescendantsInstances = {safeZone} 
+
+	for _, part in pairs(character:GetChildren()) do
+		if part:IsA("BasePart") then
+			local touchingParts = Workspace:GetPartsInPart(part, overlapParams)
+			if #touchingParts > 0 then
+				return true 
+			end
+		end
+	end
+
+	-- 2️⃣ METHOD B: RAYCAST CHECK (Good for Thin Lilypads)
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		local rayOrigin = rootPart.Position
+		local rayDirection = Vector3.new(0, -RAY_LENGTH, 0) -- Downwards
+
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Include
+		rayParams.FilterDescendantsInstances = {safeZone} -- Only hit SwampAddons
+
+		local rayResult = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
+
+		if rayResult then
+			return true
+		end
+	end
+
+	return false 
+end
+
+-- ============================================================================
+-- 🌊 MAIN TELEPORT LOGIC
+-- ============================================================================
+local function onWaterTouched(hit)
+	local character = hit.Parent
+	local player = Players:GetPlayerFromCharacter(character)
+
+	if not player then return end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	local returnPart = Workspace:FindFirstChild(TARGET_PART_NAME)
+
+	if not returnPart then return end
+
+	-- 🛑 DEBOUNCE
+	if teleportingPlayers[player.UserId] then return end
+	teleportingPlayers[player.UserId] = true 
+
+	-- 🛑 SAFETY CHECK
+	if isPlayerSafe(character) then
+		task.wait(0.5) 
+		teleportingPlayers[player.UserId] = nil
+		return 
+	end
+
+	-- ✅ NOT SAFE - EXECUTE TELEPORT SEQUENCE
+	
+	-- 1. Sound
+	local sound = Instance.new("Sound")
+	sound.Name = "SplashSFX"
+	sound.SoundId = SPLASH_SOUND_ID
+	sound.Volume = SOUND_VOLUME
+	sound.Parent = rootPart
+	sound:Play()
+	Debris:AddItem(sound, 3)
+
+	-- 2. Delay
+	task.wait(DELAY_TIME)
+
+	-- 3. Teleport
+	if character and character:FindFirstChild("HumanoidRootPart") then
+		character:PivotTo(returnPart.CFrame + SAFETY_OFFSET)
+	end
+
+	-- 4. Reset
+	task.wait(1)
+	teleportingPlayers[player.UserId] = nil
+end
+
+-- ============================================================================
+-- 🛠️ SETUP
+-- ============================================================================
+local function setupWaterPart(part)
+	if part:IsA("BasePart") and part.Name == "Water" then
+		part.Touched:Connect(onWaterTouched)
+	end
+end
+
+-- Startup Checks
+local waterFolder = Workspace:FindFirstChild(WATER_FOLDER_NAME)
+if waterFolder then
+	for _, child in pairs(waterFolder:GetChildren()) do setupWaterPart(child) end
+	waterFolder.ChildAdded:Connect(setupWaterPart)
+else
+	warn("Script Error: '" .. WATER_FOLDER_NAME .. "' folder missing in Workspace.")
+end
