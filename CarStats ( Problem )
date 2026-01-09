@@ -1,22 +1,7 @@
 -- MODULE SCRIPT: CarStats
 -- LOCATION: ReplicatedStorage > CarStats
--- not generating money
 
 local CarStats = {}
-
--- ========================================================================
--- 💳 LICENSES
--- Players must buy these to access the next folder of cars.
--- ========================================================================
-CarStats.Licenses = {
-	["Common"]    = { Price = 0,           Description = "Starter License." },
-	["Uncommon"]  = { Price = 25000,       Description = "Unlocks street cars." },
-	["Rare"]      = { Price = 450000,      Description = "Unlocks performance cars." },
-	["Epic"]      = { Price = 4500000,     Description = "Unlocks supercars." },
-	["Legendary"] = { Price = 35000000,    Description = "Unlocks hypercars." },
-	["Mythic"]    = { Price = 250000000,   Description = "Unlocks the endgame." },
-}
-
 -- ========================================================================
 -- 🚗 VEHICLE DATABASE
 -- ========================================================================
@@ -109,13 +94,13 @@ CarStats.Cars = {
 		Name = "Mercedes-Benz A-Class",
 		CPS = 310,
 		Rarity = "Rare",
-		Price = 190000 -- $190k
+		Price = 210000 -- $190k
 	},
 	["Maverick"] = {
 		Name = "Corvette C8 Stingray",
 		CPS = 220, -- Lower CPS than Stuttgart, kept as you requested
 		Rarity = "Rare",
-		Price = 210000 -- FIXED: Was $12,000. Changed to $210k to fit Rare tier.
+		Price = 19000 -- FIXED: Was $12,000. Changed to $210k to fit Rare tier.
 	},
 	["Velocity"] = {
 		Name = "Toyota Supra Mk4 (A80)",
