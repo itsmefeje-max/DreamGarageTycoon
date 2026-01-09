@@ -1,6 +1,7 @@
 -- [[ SERVER SCRIPT: PlotHandler (Final Auto-Scale Edition) ]]
 -- -- Indicating what the script is for: Updates Garage Owner text safely.
 -- FEATURES: Auto-scales text for long names, infinite loading safety, preserves design.
+-- UPDATE: Adds "( Vacant )" to the default sign text when no player owns it.
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -19,7 +20,8 @@ local TEXT_LABEL_NAME = "Owner"
 -- ---------------------------------------------------------
 local function applyText(textLabel, playerName)
 	-- 1. LOCK DEFAULT TEXT (Safety)
-	-- We save YOUR original text (e.g. "For Sale") purely for memory.
+	-- We save YOUR original text (e.g. "Garage 1", "For Sale") purely for memory.
+	-- This ensures we always know what the sign said before anyone claimed it.
 	if not textLabel:GetAttribute("DefaultText") then
 		textLabel:SetAttribute("DefaultText", textLabel.Text)
 	end
@@ -30,9 +32,12 @@ local function applyText(textLabel, playerName)
 		textLabel.Text = playerName .. "'s Garage"
 		textLabel.TextScaled = true -- [FIX] Ensures long names shrink to fit instead of cutting off
 	else
-		-- ♻️ PLOT IS EMPTY (Restore Your Original Text)
-		local savedText = textLabel:GetAttribute("DefaultText")
-		textLabel.Text = savedText or "For Sale"
+		-- ♻️ PLOT IS EMPTY (Restore Original Text + Add Vacant Status)
+		local savedText = textLabel:GetAttribute("DefaultText") or "Garage"
+		
+		-- This adds the "( Vacant )" text you requested
+		textLabel.Text = savedText .. " ( Vacant )"
+		
 		textLabel.TextScaled = true -- [FIX] Ensures default text fits too
 	end
 end
