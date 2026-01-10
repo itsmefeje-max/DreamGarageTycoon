@@ -1,1 +1,245 @@
-this repository does not include all my gamne scripts especially for BillboardGUIs and UI stroke colors and simple scripts that does not affedct the game and economy themselves.
+this repository does not include all my gamne scripts especially for BillboardGUIs and UI stroke colors and simple scripts that does not affedct the game and economy themselves. by the way here is some of the styles i use for my billboardGUI
+
+
+-- ( This script applies the LEGENDARY TIER Effect )
+-- ( TEXT: Polished Gold Plate (Metallic Shine) )
+-- ( OUTLINE: Rotating Solar Flare (Orange/Yellow Energy) )
+
+local RunService = game:GetService("RunService")
+local TextLabel = script.Parent
+
+-- 1. CLEAN UP (Remove old effects)
+for _, child in pairs(TextLabel:GetChildren()) do
+	if child:IsA("UIGradient") or child:IsA("UIStroke") then
+		child:Destroy()
+	end
+end
+
+-- 2. SETUP
+local billboardGui = TextLabel:FindFirstAncestorWhichIsA("BillboardGui")
+if billboardGui then
+	billboardGui.AlwaysOnTop = true
+	billboardGui.LightInfluence = 0
+end
+
+-- Visual Base Settings (Does not change text content)
+TextLabel.BackgroundTransparency = 1
+TextLabel.TextColor3 = Color3.new(1, 1, 1) -- White base
+TextLabel.Font = Enum.Font.FredokaOne      -- Thick font for the 'Badge' look
+
+-- ====================================================
+-- PART 1: POLISHED GOLD TEXT (The Metal Look)
+-- ====================================================
+local textGradient = Instance.new("UIGradient")
+textGradient.Name = "LegendaryGoldGradient"
+textGradient.Parent = TextLabel
+
+-- A "Shiny Metal" Gold Sequence
+textGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 230, 100)), -- Top: Pale Gold (Highlight)
+	ColorSequenceKeypoint.new(0.50, Color3.fromRGB(255, 170, 0)),   -- Middle: Rich Gold
+	ColorSequenceKeypoint.new(1.00, Color3.fromRGB(160, 90, 0))     -- Bottom: Bronze Shadow
+})
+textGradient.Rotation = 90 -- Vertical Top-to-Bottom shine
+
+-- ====================================================
+-- PART 2: SOLAR FLARE OUTLINE (The Glow)
+-- ====================================================
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Name = "SolarStroke"
+uiStroke.Parent = TextLabel
+uiStroke.Thickness = 3 -- Thick enough to look strong, not messy
+uiStroke.Transparency = 0
+uiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+uiStroke.Color = Color3.new(1, 1, 1)
+
+local strokeGradient = Instance.new("UIGradient")
+strokeGradient.Name = "SolarGradient"
+strokeGradient.Parent = uiStroke
+
+-- Sunburst Colors (Yellow -> Orange -> Red-Orange -> Yellow)
+strokeGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 150, 0)),   -- Deep Orange
+	ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 255, 0)),   -- Electric Yellow
+	ColorSequenceKeypoint.new(0.66, Color3.fromRGB(255, 100, 0)),   -- Burnt Orange
+	ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 150, 0))    -- Deep Orange
+})
+
+-- ====================================================
+-- ANIMATION (Rotating Sun)
+-- ====================================================
+local speed = 1.5 -- Faster than cash, slower than Mythical
+local connection
+
+connection = RunService.Heartbeat:Connect(function(deltaTime)
+	if not TextLabel or not TextLabel.Parent then
+		if connection then connection:Disconnect() end
+		return
+	end
+
+	-- Rotate the Solar Flare around the gold text
+	strokeGradient.Rotation = (strokeGradient.Rotation + (speed * 40 * deltaTime)) % 360
+end)
+
+-- ( This script applies the COMMON NAME style: "Silver Satin" )
+-- ( Visuals: Silver Text + Slow Metallic Reflection )
+-- ( MAX ACTIVATION DISTANCE: 9999 )
+
+local RunService = game:GetService("RunService")
+local TextLabel = script.Parent
+
+-- === CONFIGURATION ===
+local MAX_ACTIVATION_DISTANCE = 9999
+
+-- 1. CLEAN UP
+for _, child in pairs(TextLabel:GetChildren()) do
+	if child:IsA("UIGradient") or child:IsA("UIStroke") then
+		child:Destroy()
+	end
+end
+
+-- 2. BILLBOARD & DISTANCE SETUP
+local billboardGui = TextLabel:FindFirstAncestorWhichIsA("BillboardGui")
+if billboardGui then
+	billboardGui.MaxDistance = MAX_ACTIVATION_DISTANCE
+	billboardGui.AlwaysOnTop = true
+	billboardGui.LightInfluence = 0
+end
+
+-- 3. VISUAL SETUP
+TextLabel.BackgroundTransparency = 1
+TextLabel.TextColor3 = Color3.new(1, 1, 1)
+TextLabel.Font = Enum.Font.FredokaOne
+
+-- ====================================================
+-- PART 1: TEXT (Silver with Satin Shine)
+-- ====================================================
+local textGradient = Instance.new("UIGradient")
+textGradient.Name = "SatinShineGradient"
+textGradient.Parent = TextLabel
+textGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, Color3.fromRGB(180, 180, 180)), 
+	ColorSequenceKeypoint.new(0.50, Color3.fromRGB(255, 255, 255)), -- The Satin Shine
+	ColorSequenceKeypoint.new(1.00, Color3.fromRGB(180, 180, 180))
+})
+
+-- ====================================================
+-- PART 2: STATIC DARK BORDER
+-- ====================================================
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Name = "CommonNameStroke"
+uiStroke.Parent = TextLabel
+uiStroke.Thickness = 3
+uiStroke.Color = Color3.fromRGB(50, 50, 50) -- Dark Grey
+
+-- ====================================================
+-- ANIMATION (Very Slow Sweep)
+-- ====================================================
+local speed = 0.3 -- Extremely slow and subtle
+local connection
+connection = RunService.Heartbeat:Connect(function(deltaTime)
+	if not TextLabel or not TextLabel.Parent then if connection then connection:Disconnect() end return end
+
+	-- Moves the silver shine across the name very calmly
+
+-- ( SCRIPT: MYTHICAL NAME STYLE - "The Crimson Sheen" )
+-- ( Visuals: Deep Red Text + Horizontal White Flash + Smooth Horizontal Rainbow Outline )
+-- ( Designed to be "Clean" and "High Tier" like the Legendary style )
+
+local RunService = game:GetService("RunService")
+local TextLabel = script.Parent
+
+-- === CONFIGURATION ===
+local MAX_ACTIVATION_DISTANCE = 9999
+
+-- 1. CLEAN UP
+for _, child in pairs(TextLabel:GetChildren()) do
+	if child:IsA("UIGradient") or child:IsA("UIStroke") then
+		child:Destroy()
+	end
+end
+
+-- 2. BILLBOARD & DISTANCE SETUP
+local billboardGui = TextLabel:FindFirstAncestorWhichIsA("BillboardGui")
+if billboardGui then
+	billboardGui.MaxDistance = MAX_ACTIVATION_DISTANCE
+	billboardGui.AlwaysOnTop = true
+	billboardGui.LightInfluence = 0
+end
+
+-- 3. VISUAL SETUP
+TextLabel.BackgroundTransparency = 1
+TextLabel.TextColor3 = Color3.new(1, 1, 1) -- White base
+TextLabel.Font = Enum.Font.FredokaOne
+
+-- ====================================================
+-- PART 1: THE TEXT (Red with White Sheen)
+-- ====================================================
+local textGradient = Instance.new("UIGradient")
+textGradient.Name = "CrimsonSheenGradient"
+textGradient.Parent = TextLabel
+
+-- Color: Dark Red -> Bright Red -> PURE WHITE FLASH -> Bright Red -> Dark Red
+textGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, Color3.fromRGB(100, 0, 0)),   -- Dark Blood
+	ColorSequenceKeypoint.new(0.40, Color3.fromRGB(255, 0, 0)),   -- Bright Red
+	ColorSequenceKeypoint.new(0.50, Color3.fromRGB(255, 255, 255)), -- WHITE SHINE
+	ColorSequenceKeypoint.new(0.60, Color3.fromRGB(255, 0, 0)),   -- Bright Red
+	ColorSequenceKeypoint.new(1.00, Color3.fromRGB(100, 0, 0))    -- Dark Blood
+})
+textGradient.Rotation = 0 -- Horizontal (Left to Right)
+
+-- ====================================================
+-- PART 2: THE OUTLINE (Horizontal Rainbow Stream)
+-- ====================================================
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Name = "RainbowFlowStroke"
+uiStroke.Parent = TextLabel
+uiStroke.Thickness = 4
+uiStroke.Transparency = 0
+uiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+uiStroke.Color = Color3.new(1, 1, 1)
+
+local strokeGradient = Instance.new("UIGradient")
+strokeGradient.Name = "RainbowLinearGradient"
+strokeGradient.Parent = uiStroke
+
+-- Rainbow Spectrum
+strokeGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),   -- Red
+	ColorSequenceKeypoint.new(0.20, Color3.fromRGB(255, 255, 0)), -- Yellow
+	ColorSequenceKeypoint.new(0.40, Color3.fromRGB(0, 255, 0)),   -- Green
+	ColorSequenceKeypoint.new(0.60, Color3.fromRGB(0, 255, 255)), -- Cyan
+	ColorSequenceKeypoint.new(0.80, Color3.fromRGB(0, 0, 255)),   -- Blue
+	ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 255))  -- Purple
+})
+strokeGradient.Rotation = 0 -- Horizontal (Matches the text sheen direction)
+
+-- ====================================================
+-- ANIMATION (Synchronized Horizontal Flow)
+-- ====================================================
+local sheenSpeed = 0.8 -- The speed of the white flash
+local rainbowSpeed = 0.3 -- The speed of the rainbow border (slower, elegant)
+local timeElapsed = 0
+local connection
+
+connection = RunService.Heartbeat:Connect(function(deltaTime)
+	if not TextLabel or not TextLabel.Parent then if connection then connection:Disconnect() end return end
+
+	timeElapsed = timeElapsed + deltaTime
+
+	-- 1. Text Sheen Animation (Sweeps across)
+	-- math.sin creates the back-and-forth sheen loop
+	local offset = math.sin(timeElapsed * sheenSpeed) * 1.5 
+	textGradient.Offset = Vector2.new(offset, 0)
+
+	-- 2. Rainbow Outline Animation (Flows continuously to the right)
+	-- The % 2 loop creates an infinite scrolling rainbow effect
+	local rainbowScroll = (timeElapsed * rainbowSpeed) % 2
+	strokeGradient.Offset = Vector2.new(rainbowScroll - 1, 0)
+end)
+	local offset = math.sin(tick() * speed) * 1.5
+	textGradient.Offset = Vector2.new(offset, 0)
+end)
+
+
