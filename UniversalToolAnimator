@@ -1,0 +1,68 @@
+-- [[ LOCAL SCRIPT: UniversalToolAnimator (No Spin) ]]
+-- -- Indicating what the script is for: Animates held tools with a gentle UP/DOWN float only.
+-- LOCATION: StarterPlayer > StarterPlayerScripts
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+
+-- ⚙️ CONFIGURATION
+local FLOAT_HEIGHT = 3   -- Base height above hand
+local BOB_SPEED = 2       -- How fast it goes up/down
+local BOB_HEIGHT = 0.5     -- How far it travels
+
+-- 🛡️ STATE
+local currentTool = nil
+local originalGrip = nil
+local animConnection = nil
+
+local function stopAnimation()
+	if animConnection then
+		animConnection:Disconnect()
+		animConnection = nil
+	end
+	if currentTool and originalGrip then
+		currentTool.Grip = originalGrip
+	end
+	currentTool = nil
+	originalGrip = nil
+end
+
+local function animateTool(character, tool)
+	stopAnimation()
+	currentTool = tool
+	originalGrip = tool.Grip
+
+	-- Wait for hand to be ready
+	local arm = character:FindFirstChild("Right Arm") or character:FindFirstChild("RightHand")
+	if not arm then return end
+
+	animConnection = RunService.RenderStepped:Connect(function()
+		if tool.Parent ~= character then
+			stopAnimation()
+			return
+		end
+
+		local t = time()
+		local bob = math.sin(t * BOB_SPEED) * BOB_HEIGHT
+
+		-- ONLY Move Up/Down (No CFrame.Angles)
+		tool.Grip = originalGrip * CFrame.new(0, -FLOAT_HEIGHT - bob, 0) 
+	end)
+end
+
+local function onCharacterAdded(character)
+	character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			animateTool(character, child)
+		end
+	end)
+
+	character.ChildRemoved:Connect(function(child)
+		if child == currentTool then stopAnimation() end
+	end)
+end
+
+if player.Character then onCharacterAdded(player.Character) end
+player.CharacterAdded:Connect(onCharacterAdded)
