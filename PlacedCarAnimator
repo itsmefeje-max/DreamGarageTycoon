@@ -1,0 +1,75 @@
+-- [[ SERVER SCRIPT: PlacedCarAnimator (No Spin) ]]
+-- -- Indicating what the script is for: Animates ALL cars on ALL pads with a gentle UP/DOWN float only.
+-- LOCATION: ServerScriptService
+
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
+
+-- ⚙️ CONFIGURATION (Breathing Effect)
+local DISPLACEMENT_SPREAD = 0.5   -- How high/low it goes (Studs)
+local DISPLACEMENT_SPEED = 2      -- How fast it bobs up and down
+
+-- 🛡️ STATE MANAGEMENT
+-- We store the "Base Position" of every car so it doesn't drift away
+local activeCars = {} -- [CarModel] = OriginalCFrame
+
+-- 🛠️ REGISTER CAR
+local function trackCar(car)
+	if not car:IsA("Model") then return end
+	if activeCars[car] then return end -- Already tracked
+
+	-- Wait 0.2s for PadController to finish positioning the car
+	-- This ensures we capture the CORRECT position on the pad
+	task.wait(0.2)
+
+	activeCars[car] = car:GetPivot()
+end
+
+-- 🛠️ SCAN PLOT
+local function monitorPlot(plot)
+	-- Wait for the folder where PadController puts the cars
+	local carFolder = plot:WaitForChild("PlacedCars", 10)
+	if not carFolder then return end
+
+	-- 1. Track existing cars
+	for _, car in pairs(carFolder:GetChildren()) do
+		trackCar(car)
+	end
+
+	-- 2. Listen for NEW cars (When a player buys/places one)
+	carFolder.ChildAdded:Connect(trackCar)
+
+	-- 3. Cleanup removed cars (When a player picks it up)
+	carFolder.ChildRemoved:Connect(function(car)
+		activeCars[car] = nil
+	end)
+end
+
+-- 🚀 STARTUP: Find all existing Tycoons
+for _, plot in pairs(TycoonFolder:GetChildren()) do
+	monitorPlot(plot)
+end
+
+-- Listen for new Tycoons (just in case they load late)
+TycoonFolder.ChildAdded:Connect(monitorPlot)
+
+-- 🔄 ANIMATION LOOP (Heartbeat runs every frame on Server)
+RunService.Heartbeat:Connect(function()
+	local t = time()
+
+	-- Calculate bobbing (Sine Wave)
+	local yDisplacement = math.sin(t * DISPLACEMENT_SPEED) * DISPLACEMENT_SPREAD
+
+	for car, baseCF in pairs(activeCars) do
+		if car.Parent then
+			-- Apply ONLY height change (No Rotation)
+			-- Logic: Take Base Position -> Add Y Offset -> Move Car
+			car:PivotTo(baseCF * CFrame.new(0, yDisplacement, 0))
+		else
+			-- Garbage collection if car was deleted unexpectedly
+			activeCars[car] = nil
+		end
+	end
+end)
