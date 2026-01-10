@@ -1,4 +1,4 @@
--- MODULE SCRIPT: CarStats
+-- [[ MODULE SCRIPT: CarStats ]]
 -- LOCATION: ReplicatedStorage > CarStats
 
 local CarStats = {}
@@ -7,7 +7,7 @@ local CarStats = {}
 -- ========================================================================
 CarStats.Cars = {
 
-	-- ⚪ COMMON TIERS (The Hook)
+	-- ⬜ COMMON TIERS (The Hook)
 	-- Goal: Fast progression. Players get addicted quickly.
 	-- ====================================================================
 	["Delta"] = { 
@@ -47,7 +47,7 @@ CarStats.Cars = {
 		Price = 18000 -- $18k (The first "Wall")
 	},
 
-	-- 🟢 UNCOMMON TIERS (The Bridge)
+	-- 🟩 UNCOMMON TIERS (The Bridge)
 	-- Goal: Keeps them playing. "I can afford this soon."
 	-- ====================================================================
 	["Raiju"] = {
@@ -81,7 +81,7 @@ CarStats.Cars = {
 		Price = 85000 -- $85k
 	},
 
-	-- 🔵 RARE TIERS (The Mid-Game)
+	-- 🟦 RARE TIERS (The Mid-Game)
 	-- Goal: Enthusiast cars. Players start feeling "Rich".
 	-- ====================================================================
 	["Javelin"] = {
@@ -96,12 +96,12 @@ CarStats.Cars = {
 		Rarity = "Rare",
 		Price = 210000 -- $190k
 	},
-["Maverick"] = {
-    Name = "Corvette C8 Stingray",
-    CPS = 220, 
-    Rarity = "Rare",
-    Price = 210000 -- [FIXED] Updated from 19000 to match your comment
-},
+	["Maverick"] = {
+		Name = "Corvette C8 Stingray",
+		CPS = 220, -- Lower CPS than Stuttgart, kept as you requested
+		Rarity = "Rare",
+		Price = 210000 -- ✅ FIXED: Corrected to $210k to fit Rare tier
+	},
 	["Velocity"] = {
 		Name = "Toyota Supra Mk4 (A80)",
 		CPS = 360,
@@ -109,7 +109,7 @@ CarStats.Cars = {
 		Price = 280000 -- $280k
 	},
 
-	-- 🟣 EPIC TIERS (High Performance)
+	-- 🟪 EPIC TIERS (High Performance)
 	-- Goal: The first major grind. Robux spending becomes tempting.
 	-- ====================================================================
 	["Sadie"] = {
@@ -131,7 +131,7 @@ CarStats.Cars = {
 		Price = 1200000 -- $1.2 Million (Price increased to match high CPS)
 	},
 
-	-- 🟡 LEGENDARY TIERS (The Dream Cars)
+	-- 🟧 LEGENDARY TIERS (The Dream Cars)
 	-- Goal: Massive status symbols.
 	-- ====================================================================
 	["Yamura"] = {
@@ -147,7 +147,7 @@ CarStats.Cars = {
 		Price = 35000000 -- $35 Million (Increased for stability)
 	},
 
-	-- 🔴 MYTHIC TIERS (The Endgame)
+	-- 🟥 MYTHIC TIERS (The Endgame)
 	-- Goal: The "Chase Item." Keeps players grinding for days/weeks.
 	-- ====================================================================
 	["Centurion"] = {
