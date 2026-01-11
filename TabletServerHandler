@@ -1,6 +1,6 @@
 -- [[ SERVER SCRIPT: TabletServerHandler ]]
 -- Purpose: Handles Tablet updates & Secure Claiming.
--- FIX: AUTO-SEPARATES '$' from the Number so the '$' stays STAGNANT.
+-- Updated: Deletes the Constraint BEFORE cloning/resizing to prevent the console error.
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -32,6 +32,16 @@ local function formatNumber(n)
 	return string.format("%.2f%s", n / v, suffix)
 end
 
+-- 🧹 HELPER: REMOVE CONSTRAINT
+local function nukeConstraints(obj)
+	if not obj then return end
+	for _, child in pairs(obj:GetChildren()) do
+		if child:IsA("UITextSizeConstraint") then
+			child:Destroy()
+		end
+	end
+end
+
 -- ============================================================================
 -- 🛠️ TABLET SETUP FUNCTION
 -- ============================================================================
@@ -44,26 +54,26 @@ local function setupTablet(plot)
 		local mainPart = model:WaitForChild("Earnings", 10)
 		if not mainPart then return end
 
-		-- Smart Search for Revenue Part
-		local revenuePart = model:FindFirstChild("Revenue-indicator")
-		
-		-- Anchor Parts
-		mainPart.Anchored = true
-		mainPart.CanCollide = true 
-		mainPart.Velocity = Vector3.zero
+		local claimPart = model:WaitForChild("ClaimPart", 10)
+		if not claimPart then 
+			warn("⚠️ TabletServerHandler: Could not find 'ClaimPart' in " .. plot.Name)
+			return 
+		end
 
+		-- Anchor Parts
+		mainPart.Anchored = true; mainPart.CanCollide = true; mainPart.Velocity = Vector3.zero
+		claimPart.Anchored = true; claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
+
+		local revenuePart = model:FindFirstChild("Revenue-indicator")
 		if revenuePart then
-			revenuePart.Anchored = true
-			revenuePart.CanCollide = true 
-			revenuePart.Velocity = Vector3.zero
+			revenuePart.Anchored = true; revenuePart.CanCollide = true; revenuePart.Velocity = Vector3.zero
 		end
 
 		-- 2. GET GUIS
 		local avatarGui = mainPart:WaitForChild("AvatarGUI", 10)
 		local usernameGui = mainPart:WaitForChild("UsernameGUI", 10)
-		local claimGui = mainPart:WaitForChild("ClaimGUI", 10)
-		
-		-- Find RevenueGUI (Look in new part first, then old)
+		local claimGui = claimPart:WaitForChild("ClaimGUI", 10)
+
 		local revenueGui = nil
 		if revenuePart then revenueGui = revenuePart:FindFirstChild("RevenueGUI") end
 		if not revenueGui then revenueGui = mainPart:FindFirstChild("RevenueGUI") end
@@ -77,30 +87,40 @@ local function setupTablet(plot)
 
 		local ownerVal = plot:WaitForChild("Owner", 10)
 		local pendingVal = plot:WaitForChild("PendingEarnings", 10)
-		
+
 		-- 🔧 AUTO-FIX: SEPARATE "$" FROM NUMBER 🔧
-		-- This logic creates a stagnant "$" label if it doesn't exist yet.
 		if revenueLabel:IsA("TextLabel") then
-			
+
+			-- [[ 🛑 CRITICAL FIX: DELETE CONSTRAINT FIRST ]]
+			-- We destroy the error-causing object BEFORE we do anything else.
+			nukeConstraints(revenueLabel)
+
 			-- Check if we already created the Dollar Label
 			local dollarLabel = revenueGui:FindFirstChild("Dollar-Static")
-			
+
 			if not dollarLabel then
-				-- CLONE the original label to keep your FONT and STYLE exactly the same
+				-- Now we clone (Since we nuked the original, the clone is clean too!)
 				dollarLabel = revenueLabel:Clone()
 				dollarLabel.Name = "Dollar-Static"
 				dollarLabel.Parent = revenueGui
-				
-				-- CONFIG 1: The Dollar Sign (Static on the Left)
+
+				-- Just in case, nuke the clone too (Paranoia check)
+				nukeConstraints(dollarLabel)
+
+				-- CONFIG 1: The Dollar Sign
 				dollarLabel.Text = "$"
-				dollarLabel.Size = UDim2.new(0.25, 0, 1, 0) -- Takes up 25% of space on left
-				dollarLabel.Position = UDim2.new(0, 0, 0, 0) -- Far left
-				dollarLabel.TextXAlignment = Enum.TextXAlignment.Center -- Center the $ in its own box
-				
-				-- CONFIG 2: The Number (Dynamic on the Right)
-				revenueLabel.Size = UDim2.new(0.75, 0, 1, 0) -- Takes up remaining 75%
-				revenueLabel.Position = UDim2.new(0.25, 0, 0, 0) -- Starts after the $
-				revenueLabel.TextXAlignment = Enum.TextXAlignment.Left -- Grows to the right
+				dollarLabel.Size = UDim2.new(0.25, 0, 1, 0)
+				dollarLabel.Position = UDim2.new(0, 0, 0, 0)
+				dollarLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+				-- CONFIG 2: The Number
+				-- We can safely resize now because the constraint is gone.
+				revenueLabel.Size = UDim2.new(0.75, 0, 1, 0)
+				revenueLabel.Position = UDim2.new(0.25, 0, 0, 0)
+				revenueLabel.TextXAlignment = Enum.TextXAlignment.Left
+			else
+				-- If it already exists, make sure it's clean
+				nukeConstraints(dollarLabel)
 			end
 		end
 
@@ -123,7 +143,6 @@ local function setupTablet(plot)
 		end
 
 		local function updateRevenue()
-			-- ONLY update the number (The $ is now handled by the separate label)
 			revenueLabel.Text = formatNumber(pendingVal.Value) 
 		end
 
