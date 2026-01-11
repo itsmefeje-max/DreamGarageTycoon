@@ -2,7 +2,6 @@
 -- -- Indicating what the script is for: Updates Garage Owner text safely.
 -- FEATURES: Auto-scales text for long names, infinite loading safety, preserves design.
 -- UPDATE: Adds "( Vacant )" to the default sign text when no player owns it.
-
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
@@ -49,9 +48,13 @@ local function setupPlot(plot)
 	-- Wrapped in spawn to prevent one plot lagging others
 	task.spawn(function()
 		
-		-- 1. CRITICAL: Wait for the Owner Value (Up to 5 mins)
-		local ownerValue = plot:WaitForChild("Owner", 300)
-		if not ownerValue then return end
+		-- 1. CRITICAL: Wait for the Owner Value (Optimized to 60s)
+		-- If it takes longer than 60s, something is broken, so we stop waiting.
+		local ownerValue = plot:WaitForChild("Owner", 60)
+		if not ownerValue then 
+			warn("⚠️ PlotHandler: Timed out waiting for 'Owner' value in " .. plot.Name)
+			return 
+		end
 
 		-- 2. CRITICAL: Wait for the Visuals (Hierarchy)
 		-- Uses timeouts to handle lag/streaming without breaking
