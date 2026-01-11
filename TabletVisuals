@@ -1,0 +1,100 @@
+-- [[ LOCAL SCRIPT: TabletVisuals ]]
+-- Purpose: Handles Hover Animations, Click Detection, and SFX for the Tablet.
+-- LOCATION: StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+local TabletEvent = ReplicatedStorage:WaitForChild("TabletEvent")
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
+
+-- ⚙️ ANIMATION CONFIG
+local HOVER_SCALE = 1.05 -- Grows 5% bigger (Subtle & Clean)
+local HOVER_SPEED = 0.2
+local CLICK_SOUND_ID = "rbxassetid://9083627113" -- Matches your Bank/Inventory Sound
+
+-- 🛠️ ANIMATION TWEENS
+local function addHoverEffect(button)
+	if not button:IsA("GuiButton") then return end
+	
+	-- Store original size to revert later
+	local originalSize = button.Size
+	
+	-- Calculate Target Size
+	local targetSize = UDim2.new(
+		originalSize.X.Scale * HOVER_SCALE, originalSize.X.Offset,
+		originalSize.Y.Scale * HOVER_SCALE, originalSize.Y.Offset
+	)
+
+	-- Hover Enter
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TweenInfo.new(HOVER_SPEED), {Size = targetSize}):Play()
+	end)
+
+	-- Hover Leave
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TweenInfo.new(HOVER_SPEED), {Size = originalSize}):Play()
+	end)
+
+	-- Click Logic (Visuals Only)
+	button.MouseButton1Down:Connect(function()
+		local sound = Instance.new("Sound")
+		sound.SoundId = CLICK_SOUND_ID
+		sound.Volume = 0.5
+		sound.Parent = SoundService
+		sound:Play()
+		game.Debris:AddItem(sound, 1)
+	end)
+end
+
+-- ============================================================================
+-- 🕵️ MONITOR & CONNECT
+-- ============================================================================
+local function setupClientTablet(plot)
+	-- Look for the Tablet Model
+	local model = plot:WaitForChild("ClaimEarnings", 30)
+	if not model then return end
+	
+	local part = model:WaitForChild("Earnings", 10)
+	if not part then return end
+	
+	local claimGui = part:WaitForChild("ClaimGUI", 10)
+	if not claimGui then return end
+	
+	-- Find Buttons (Ensure names match your model)
+	local btnNormal = claimGui:WaitForChild("ClaimButton", 10)
+	local btn2X = claimGui:WaitForChild("ClaimButton2X", 10)
+
+	-- 1. APPLY ANIMATIONS
+	if btnNormal then addHoverEffect(btnNormal) end
+	if btn2X then addHoverEffect(btn2X) end
+
+	-- 2. HANDLE CLICKS (Fire Server)
+	if btnNormal then
+		btnNormal.MouseButton1Click:Connect(function()
+			-- Visual feedback: Maybe dim slightly?
+			btnNormal.ImageTransparency = 0.2
+			task.delay(0.1, function() btnNormal.ImageTransparency = 0 end)
+			
+			TabletEvent:FireServer("Claim", plot.Name)
+		end)
+	end
+
+	if btn2X then
+		btn2X.MouseButton1Click:Connect(function()
+			TabletEvent:FireServer("Prompt2X", plot.Name)
+		end)
+	end
+end
+
+-- Initialize
+for _, plot in pairs(TycoonFolder:GetChildren()) do
+	task.spawn(function() setupClientTablet(plot) end)
+end
+TycoonFolder.ChildAdded:Connect(function(plot)
+	task.spawn(function() setupClientTablet(plot) end)
+end)
