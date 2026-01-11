@@ -1,216 +1,145 @@
--- [[ SERVER SCRIPT: TabletServerHandler ]]
--- Purpose: Handles Tablet updates & Secure Claiming.
--- Updated: AGGRESSIVELY removes the UI Error from both original and cloned labels.
+-- [[ LOCAL SCRIPT: TabletVisuals ]]
+-- Purpose: Handles Tablet Logic.
+-- Updated: Now finds ClaimGUI inside 'ClaimPart' to match the Server Script.
 
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local MarketplaceService = game:GetService("MarketplaceService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local TabletEvent = ReplicatedStorage:WaitForChild("TabletEvent")
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
 -- ⚙️ CONFIGURATION
-local DEV_PRODUCT_ID = 3509697462
-local TYCOON_FOLDER_NAME = "Tycoons"
+local HOVER_SCALE = 1.1
+local HOVER_SPEED = 0.2
+local CLICK_SOUND_ID = "rbxassetid://9083627113" 
+local HOVER_SOUND_ID = "rbxassetid://6895079853" 
+local HOVER_VOLUME = 0.5
 
--- 📂 REFERENCES
-local TycoonFolder = Workspace:WaitForChild(TYCOON_FOLDER_NAME)
-local TabletEvent = ReplicatedStorage:FindFirstChild("TabletEvent") 
+-- 🛠️ HELPER: The "Z-Offset" Fix
+local function enableClicking(gui, part)
+	if not gui then return end
 
-if not TabletEvent then
-	TabletEvent = Instance.new("RemoteEvent")
-	TabletEvent.Name = "TabletEvent"
-	TabletEvent.Parent = ReplicatedStorage
-end
-
--- 📊 ABBREVIATION HELPER
-local SUFFIXES = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
-local function formatNumber(n)
-	n = tonumber(n) or 0
-	if n < 1000 then return tostring(math.floor(n)) end
-	local i = math.floor(math.log(n, 1000))
-	local v = math.pow(1000, i)
-	local suffix = SUFFIXES[i] or "?"
-	return string.format("%.2f%s", n / v, suffix)
-end
-
--- 🧹 HELPER: KILL THE ERROR
--- This function finds ANY constraint causing the warning and deletes it.
-local function removeConstraints(guiObject)
-	if not guiObject then return end
-	for _, child in pairs(guiObject:GetChildren()) do
-		if child:IsA("UITextSizeConstraint") then
-			child:Destroy()
-		end
+	-- 1. Move to PlayerGui
+	if gui.Parent ~= playerGui then
+		gui.Adornee = part 
+		gui.Parent = playerGui 
 	end
+
+	gui.Active = true
+	gui.Enabled = true
+	gui.ResetOnSpawn = false
+
+	-- 🚫 TURN OFF OVERLAY (Fixes character clipping)
+	gui.AlwaysOnTop = false 
+
+	-- ✅ TURN ON Z-OFFSET (Fixes clicking issues)
+	gui.ZOffset = 100 
+
+	-- Lighting
+	gui.LightInfluence = 0.5 
 end
 
--- ============================================================================
--- 🛠️ TABLET SETUP FUNCTION
--- ============================================================================
-local function setupTablet(plot)
-	task.spawn(function()
-		-- 1. WAIT FOR HIERARCHY
-		local model = plot:WaitForChild("ClaimEarnings", 30)
-		if not model then return end
+-- 🛠️ ANIMATION TWEENS
+local function addHoverEffect(button)
+	if not button:IsA("GuiButton") then return end
 
-		local mainPart = model:WaitForChild("Earnings", 10)
-		if not mainPart then return end
+	button.Active = true
+	button.ZIndex = 50 -- Ensure button is above its own background
 
-		-- [[ UPDATE: Find the new ClaimPart ]]
-		local claimPart = model:WaitForChild("ClaimPart", 10)
-		if not claimPart then 
-			warn("⚠️ TabletServerHandler: Could not find 'ClaimPart' in " .. plot.Name)
-			return 
+	local originalSize = button.Size
+
+	-- Target Size (Centered Growth)
+	local targetSize = UDim2.new(
+		originalSize.X.Scale * HOVER_SCALE, 
+		originalSize.X.Offset * HOVER_SCALE, 
+		originalSize.Y.Scale * HOVER_SCALE, 
+		originalSize.Y.Offset * HOVER_SCALE
+	)
+
+	-- HOVER ENTER
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TweenInfo.new(HOVER_SPEED, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = targetSize}):Play()
+
+		if HOVER_SOUND_ID ~= "" and HOVER_SOUND_ID ~= "rbxassetid://0" then
+			local sound = Instance.new("Sound")
+			sound.SoundId = HOVER_SOUND_ID
+			sound.Volume = HOVER_VOLUME
+			sound.Parent = SoundService
+			sound:Play()
+			game.Debris:AddItem(sound, 1)
 		end
+	end)
 
-		-- Anchor Parts
-		mainPart.Anchored = true; mainPart.CanCollide = true; mainPart.Velocity = Vector3.zero
-		claimPart.Anchored = true; claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
+	-- HOVER LEAVE
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TweenInfo.new(HOVER_SPEED, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = originalSize}):Play()
+	end)
 
-		local revenuePart = model:FindFirstChild("Revenue-indicator")
-		if revenuePart then
-			revenuePart.Anchored = true; revenuePart.CanCollide = true; revenuePart.Velocity = Vector3.zero
-		end
-
-		-- 2. GET GUIS
-		local avatarGui = mainPart:WaitForChild("AvatarGUI", 10)
-		local usernameGui = mainPart:WaitForChild("UsernameGUI", 10)
-		
-		-- [[ UPDATE: Find ClaimGUI inside ClaimPart now ]]
-		local claimGui = claimPart:WaitForChild("ClaimGUI", 10)
-		
-		-- Find RevenueGUI (Look in new part first, then old)
-		local revenueGui = nil
-		if revenuePart then revenueGui = revenuePart:FindFirstChild("RevenueGUI") end
-		if not revenueGui then revenueGui = mainPart:FindFirstChild("RevenueGUI") end
-
-		if not (avatarGui and usernameGui and claimGui and revenueGui) then return end
-
-		-- 3. GET LABELS
-		local avatarLabel = avatarGui:WaitForChild("Avatar-Label")
-		local revenueLabel = revenueGui:WaitForChild("Total-Revenue")
-		local usernameLabel = usernameGui:WaitForChild("Username")
-
-		local ownerVal = plot:WaitForChild("Owner", 10)
-		local pendingVal = plot:WaitForChild("PendingEarnings", 10)
-		
-		-- 🔧 AUTO-FIX: SEPARATE "$" FROM NUMBER 🔧
-		if revenueLabel:IsA("TextLabel") then
-			
-			-- [[ STEP 1: FORCE CLEAN THE ORIGINAL ]]
-			removeConstraints(revenueLabel)
-
-			-- Check if we already created the Dollar Label
-			local dollarLabel = revenueGui:FindFirstChild("Dollar-Static")
-			
-			if not dollarLabel then
-				-- Create it
-				dollarLabel = revenueLabel:Clone()
-				dollarLabel.Name = "Dollar-Static"
-				dollarLabel.Parent = revenueGui
-				
-				-- [[ STEP 2: FORCE CLEAN THE NEW CLONE IMMEDIATELY ]]
-				removeConstraints(dollarLabel)
-
-				-- CONFIG 1: The Dollar Sign
-				dollarLabel.Text = "$"
-				dollarLabel.Size = UDim2.new(0.25, 0, 1, 0)
-				dollarLabel.Position = UDim2.new(0, 0, 0, 0)
-				dollarLabel.TextXAlignment = Enum.TextXAlignment.Center
-				
-				-- CONFIG 2: The Number
-				revenueLabel.Size = UDim2.new(0.75, 0, 1, 0)
-				revenueLabel.Position = UDim2.new(0.25, 0, 0, 0)
-				revenueLabel.TextXAlignment = Enum.TextXAlignment.Left
-			else
-				-- [[ STEP 3: FORCE CLEAN EXISTING LABELS ]]
-				-- If the label existed from a previous run, it might still have the error. Clean it now.
-				removeConstraints(dollarLabel)
-			end
-		end
-
-		-- 4. UPDATE FUNCTIONS
-		local function updateOwnerInfo()
-			local playerName = ownerVal.Value
-			if playerName and playerName ~= "" then
-				usernameLabel.Text = playerName
-				local success, userId = pcall(function() return Players:GetUserIdFromNameAsync(playerName) end)
-				if success and userId then
-					local content, isReady = Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
-					avatarLabel.Image = isReady and content or ""
-				else
-					avatarLabel.Image = "" 
-				end
-			else
-				usernameLabel.Text = "Vacant"
-				avatarLabel.Image = "" 
-			end
-		end
-
-		local function updateRevenue()
-			revenueLabel.Text = formatNumber(pendingVal.Value) 
-		end
-
-		-- 5. LISTENERS
-		ownerVal.Changed:Connect(updateOwnerInfo)
-		pendingVal.Changed:Connect(updateRevenue)
-
-		updateOwnerInfo()
-		updateRevenue()
+	-- CLICK
+	button.MouseButton1Down:Connect(function()
+		local sound = Instance.new("Sound")
+		sound.SoundId = CLICK_SOUND_ID
+		sound.Volume = 0.5
+		sound.Parent = SoundService
+		sound:Play()
+		game.Debris:AddItem(sound, 1)
 	end)
 end
 
--- Initialize Existing Tycoons
+-- ============================================================================
+-- 🕵️ MONITOR & CONNECT
+-- ============================================================================
+local function setupClientTablet(plot)
+	local model = plot:WaitForChild("ClaimEarnings", 30)
+	if not model then return end
+
+	-- [[ UPDATE: Look for ClaimPart instead of Earnings ]] --
+	local claimPart = model:WaitForChild("ClaimPart", 10)
+
+	-- Fallback: If ClaimPart isn't there, try the old one just in case
+	if not claimPart then 
+		claimPart = model:WaitForChild("Earnings", 1)
+	end
+
+	if not claimPart then return end
+
+	local claimGui = claimPart:WaitForChild("ClaimGUI", 10)
+	if not claimGui then return end
+
+	-- ⚡ APPLY THE FIX (Uses ClaimPart as the Adornee now)
+	enableClicking(claimGui, claimPart)
+
+	local btnNormal = claimGui:WaitForChild("ClaimButton", 10)
+	local btn2X = claimGui:WaitForChild("ClaimButton2X", 10)
+
+	if btnNormal then addHoverEffect(btnNormal) end
+	if btn2X then addHoverEffect(btn2X) end
+
+	if btnNormal then
+		btnNormal.MouseButton1Click:Connect(function()
+			btnNormal.ImageTransparency = 0.5
+			task.delay(0.1, function() btnNormal.ImageTransparency = 0 end)
+			TabletEvent:FireServer("Claim", plot.Name)
+		end)
+	end
+
+	if btn2X then
+		btn2X.MouseButton1Click:Connect(function()
+			TabletEvent:FireServer("Prompt2X", plot.Name)
+		end)
+	end
+end
+
+task.wait(2) 
 for _, plot in pairs(TycoonFolder:GetChildren()) do
-	setupTablet(plot)
+	task.spawn(function() setupClientTablet(plot) end)
 end
-TycoonFolder.ChildAdded:Connect(setupTablet)
 
--- ============================================================================
--- 📡 REMOTE HANDLING
--- ============================================================================
-TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
-	local plot = TycoonFolder:FindFirstChild(plotName)
-	if not plot then return end
-
-	if plot.Owner.Value ~= player.Name then return end
-	local pendingVal = plot:FindFirstChild("PendingEarnings")
-	if not pendingVal then return end
-
-	if action == "Claim" then
-		local amount = pendingVal.Value
-		if amount <= 0 then return end 
-		pendingVal.Value = 0 
-		local ls = player:FindFirstChild("leaderstats")
-		if ls and ls:FindFirstChild("Cash") then ls.Cash.Value += amount end
-
-	elseif action == "Prompt2X" then
-		local amount = pendingVal.Value
-		if amount <= 0 then return end 
-		MarketplaceService:PromptProductPurchase(player, DEV_PRODUCT_ID)
-	end
+TycoonFolder.ChildAdded:Connect(function(plot)
+	task.spawn(function() setupClientTablet(plot) end)
 end)
-
--- ============================================================================
--- 💰 DEV PRODUCT PROCESSOR
--- ============================================================================
-MarketplaceService.ProcessReceipt = function(receiptInfo)
-	if receiptInfo.ProductId == DEV_PRODUCT_ID then
-		local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
-		if not player then return Enum.ProductPurchaseDecision.PurchaseGranted end
-
-		local myPlotName = player:GetAttribute("OccupiedPlot")
-		local plot = TycoonFolder:FindFirstChild(myPlotName or "")
-
-		if plot and plot:FindFirstChild("PendingEarnings") then
-			local pendingVal = plot.PendingEarnings
-			local amount = pendingVal.Value
-			if amount > 0 then
-				pendingVal.Value = 0
-				local ls = player:FindFirstChild("leaderstats")
-				if ls and ls:FindFirstChild("Cash") then ls.Cash.Value += (amount * 2) end
-			end
-			return Enum.ProductPurchaseDecision.PurchaseGranted
-		end
-	end
-	return Enum.ProductPurchaseDecision.NotProcessedYet
-end
