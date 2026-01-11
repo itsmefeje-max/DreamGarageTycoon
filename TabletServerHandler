@@ -1,6 +1,5 @@
 -- [[ SERVER SCRIPT: TabletServerHandler ]]
--- Purpose: Handles Tablet updates & Secure Claiming.
--- Updated: Deletes the Constraint BEFORE cloning/resizing to prevent the console error.
+-- Purpose: Handles Tablet updates, Secure Claiming & CPS Display.
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -50,19 +49,38 @@ local function setupTablet(plot)
 		local model = plot:WaitForChild("ClaimEarnings", 30)
 		if not model then return end
 
+		-- [NEW] SETUP TOTAL CPS DISPLAY
+		local cpsPart = model:WaitForChild("TotalEarningsPerSecond", 5)
+		if cpsPart then
+			local cpsGui = cpsPart:WaitForChild("EarningsAmountGUI", 5)
+			if cpsGui then
+				local cpsLabel = cpsGui:WaitForChild("Value", 5)
+				if cpsLabel then
+					-- Cleanup
+					nukeConstraints(cpsLabel)
+					
+					-- Update Function
+					local function updateCPS()
+						local currentCPS = plot:GetAttribute("CurrentCPS") or 0
+						cpsLabel.Text = "$ " .. formatNumber(currentCPS) .. "/s"
+					end
+					
+					-- Listen for changes from TycoonEconomy
+					plot:GetAttributeChangedSignal("CurrentCPS"):Connect(updateCPS)
+					updateCPS() -- Initial Update
+				end
+			end
+		end
+
 		local mainPart = model:WaitForChild("Earnings", 10)
 		if not mainPart then return end
 
 		local claimPart = model:WaitForChild("ClaimPart", 10)
-		if not claimPart then 
-			warn("⚠️ TabletServerHandler: Could not find 'ClaimPart' in " .. plot.Name)
-			return 
-		end
+		if not claimPart then return end
 
 		-- Anchor Parts
 		mainPart.Anchored = true; mainPart.CanCollide = true; mainPart.Velocity = Vector3.zero
-		claimPart.Anchored = true;
-		claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
+		claimPart.Anchored = true; claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
 
 		local revenuePart = model:FindFirstChild("Revenue-indicator")
 		if revenuePart then
@@ -89,39 +107,28 @@ local function setupTablet(plot)
 		local ownerVal = plot:WaitForChild("Owner", 10)
 		local pendingVal = plot:WaitForChild("PendingEarnings", 10)
 
-		-- [[ 🛑 CRITICAL FIX: DELETE CONSTRAINTS FIRST ]]
-		-- Removes the "MaxFontSize smaller than MinFontSize" error on ALL labels
+		-- [[ 🛑 CRITICAL FIX ]]
 		nukeConstraints(revenueLabel)
-		nukeConstraints(avatarLabel)   -- [ADDED]
-		nukeConstraints(usernameLabel) -- [ADDED]
+		nukeConstraints(avatarLabel)
+		nukeConstraints(usernameLabel)
 
 		-- 🔧 AUTO-FIX: SEPARATE "$" FROM NUMBER 🔧
 		if revenueLabel:IsA("TextLabel") then
-			
-			-- Check if we already created the Dollar Label
 			local dollarLabel = revenueGui:FindFirstChild("Dollar-Static")
-
 			if not dollarLabel then
-				-- Now we clone (Since we nuked the original, the clone is clean too!)
 				dollarLabel = revenueLabel:Clone()
 				dollarLabel.Name = "Dollar-Static"
 				dollarLabel.Parent = revenueGui
-
-				-- Just in case, nuke the clone too (Paranoia check)
 				nukeConstraints(dollarLabel)
-
-				-- CONFIG 1: The Dollar Sign
 				dollarLabel.Text = "$"
 				dollarLabel.Size = UDim2.new(0.25, 0, 1, 0)
 				dollarLabel.Position = UDim2.new(0, 0, 0, 0)
 				dollarLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-				-- CONFIG 2: The Number
 				revenueLabel.Size = UDim2.new(0.75, 0, 1, 0)
 				revenueLabel.Position = UDim2.new(0.25, 0, 0, 0)
 				revenueLabel.TextXAlignment = Enum.TextXAlignment.Left
 			else
-				-- If it already exists, make sure it's clean
 				nukeConstraints(dollarLabel)
 			end
 		end
