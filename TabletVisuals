@@ -1,6 +1,6 @@
 -- [[ LOCAL SCRIPT: TabletVisuals ]]
--- Purpose: Handles Hover Animations, Click Detection, and SFX for the Tablet.
--- FIX: Automatically moves GUIs to PlayerGui to ensure clicking ALWAYS works.
+-- Purpose: Handles Tablet Logic.
+-- FIX: Uses 'ZOffset' to fix clicking without overlaying the character.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,50 +14,75 @@ local TabletEvent = ReplicatedStorage:WaitForChild("TabletEvent")
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
 -- ⚙️ CONFIGURATION
-local HOVER_SCALE = 1.05 
+local HOVER_SCALE = 1.1
 local HOVER_SPEED = 0.2
-local CLICK_SOUND_ID = "rbxassetid://9083627113"
+local CLICK_SOUND_ID = "rbxassetid://9083627113" 
+local HOVER_SOUND_ID = "rbxassetid://6895079853" 
+local HOVER_VOLUME = 0.5
 
--- 🛠️ HELPER: Make GUI Clickable (The "Adornee" Fix)
+-- 🛠️ HELPER: The "Z-Offset" Fix
 local function enableClicking(gui, part)
 	if not gui then return end
-	
-	-- 1. Check if it's already fixed
-	if gui.Parent == playerGui then return end
-	
-	-- 2. Clone/Move logic
-	-- We reparent the GUI from Workspace -> PlayerGui
-	-- This wakes up the buttons so they can receive input.
-	gui.Adornee = part -- Tells it to "stick" visually to the tablet part
-	gui.Parent = playerGui -- Moves logic to the player (Clickable!)
-	
-	-- 3. Ensure properties are correct for interaction
+
+	-- 1. Move to PlayerGui
+	if gui.Parent ~= playerGui then
+		gui.Adornee = part 
+		gui.Parent = playerGui 
+	end
+
 	gui.Active = true
 	gui.Enabled = true
-	-- Note: We DON'T use AlwaysOnTop unless you want it seeing through walls
+	gui.ResetOnSpawn = false
+
+	-- 🚫 TURN OFF OVERLAY (Fixes character clipping)
+	gui.AlwaysOnTop = false 
+
+	-- ✅ TURN ON Z-OFFSET (Fixes clicking issues)
+	-- This pushes the UI "forward" purely for the mouse detection and rendering order.
+	-- It beats the 'AvatarGUI' and 'RevenueGUI' without beating the Character.
+	gui.ZOffset = 100 
+
+	-- Lighting (Optional: Makes it glow slightly so it's visible in dark garages)
+	gui.LightInfluence = 0.5 
 end
 
 -- 🛠️ ANIMATION TWEENS
 local function addHoverEffect(button)
 	if not button:IsA("GuiButton") then return end
-	
-	-- Ensure button is active
+
 	button.Active = true
-	
+	button.ZIndex = 50 -- Ensure button is above its own background
+
 	local originalSize = button.Size
+
+	-- Target Size (Centered Growth)
 	local targetSize = UDim2.new(
-		originalSize.X.Scale * HOVER_SCALE, originalSize.X.Offset,
-		originalSize.Y.Scale * HOVER_SCALE, originalSize.Y.Offset
+		originalSize.X.Scale * HOVER_SCALE, 
+		originalSize.X.Offset * HOVER_SCALE, 
+		originalSize.Y.Scale * HOVER_SCALE, 
+		originalSize.Y.Offset * HOVER_SCALE
 	)
 
+	-- HOVER ENTER
 	button.MouseEnter:Connect(function()
-		TweenService:Create(button, TweenInfo.new(HOVER_SPEED), {Size = targetSize}):Play()
+		TweenService:Create(button, TweenInfo.new(HOVER_SPEED, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = targetSize}):Play()
+
+		if HOVER_SOUND_ID ~= "" and HOVER_SOUND_ID ~= "rbxassetid://0" then
+			local sound = Instance.new("Sound")
+			sound.SoundId = HOVER_SOUND_ID
+			sound.Volume = HOVER_VOLUME
+			sound.Parent = SoundService
+			sound:Play()
+			game.Debris:AddItem(sound, 1)
+		end
 	end)
 
+	-- HOVER LEAVE
 	button.MouseLeave:Connect(function()
-		TweenService:Create(button, TweenInfo.new(HOVER_SPEED), {Size = originalSize}):Play()
+		TweenService:Create(button, TweenInfo.new(HOVER_SPEED, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = originalSize}):Play()
 	end)
 
+	-- CLICK
 	button.MouseButton1Down:Connect(function()
 		local sound = Instance.new("Sound")
 		sound.SoundId = CLICK_SOUND_ID
@@ -74,31 +99,26 @@ end
 local function setupClientTablet(plot)
 	local model = plot:WaitForChild("ClaimEarnings", 30)
 	if not model then return end
-	
+
 	local part = model:WaitForChild("Earnings", 10)
 	if not part then return end
-	
+
 	local claimGui = part:WaitForChild("ClaimGUI", 10)
 	if not claimGui then return end
 
-	-- ⚡ APPLY THE FIX: Move GUI to PlayerGui
+	-- ⚡ APPLY THE FIX
 	enableClicking(claimGui, part)
 
-	-- Find Buttons (Now they are inside PlayerGui, so we search safely)
 	local btnNormal = claimGui:WaitForChild("ClaimButton", 10)
 	local btn2X = claimGui:WaitForChild("ClaimButton2X", 10)
 
-	-- 1. APPLY ANIMATIONS
 	if btnNormal then addHoverEffect(btnNormal) end
 	if btn2X then addHoverEffect(btn2X) end
 
-	-- 2. HANDLE CLICKS (Fire Server)
 	if btnNormal then
 		btnNormal.MouseButton1Click:Connect(function()
-			-- Visual feedback
 			btnNormal.ImageTransparency = 0.5
 			task.delay(0.1, function() btnNormal.ImageTransparency = 0 end)
-			
 			TabletEvent:FireServer("Claim", plot.Name)
 		end)
 	end
@@ -110,8 +130,7 @@ local function setupClientTablet(plot)
 	end
 end
 
--- Initialize
-task.wait(2) -- Wait for Tycoons to load fully
+task.wait(2) 
 for _, plot in pairs(TycoonFolder:GetChildren()) do
 	task.spawn(function() setupClientTablet(plot) end)
 end
