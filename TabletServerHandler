@@ -1,7 +1,6 @@
 -- [[ SERVER SCRIPT: TabletServerHandler ]]
 -- Purpose: Handles Tablet updates & Secure Claiming.
 -- Updated: Deletes the Constraint BEFORE cloning/resizing to prevent the console error.
-
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -62,11 +61,13 @@ local function setupTablet(plot)
 
 		-- Anchor Parts
 		mainPart.Anchored = true; mainPart.CanCollide = true; mainPart.Velocity = Vector3.zero
-		claimPart.Anchored = true; claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
+		claimPart.Anchored = true;
+		claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
 
 		local revenuePart = model:FindFirstChild("Revenue-indicator")
 		if revenuePart then
-			revenuePart.Anchored = true; revenuePart.CanCollide = true; revenuePart.Velocity = Vector3.zero
+			revenuePart.Anchored = true; revenuePart.CanCollide = true;
+			revenuePart.Velocity = Vector3.zero
 		end
 
 		-- 2. GET GUIS
@@ -88,13 +89,15 @@ local function setupTablet(plot)
 		local ownerVal = plot:WaitForChild("Owner", 10)
 		local pendingVal = plot:WaitForChild("PendingEarnings", 10)
 
+		-- [[ 🛑 CRITICAL FIX: DELETE CONSTRAINTS FIRST ]]
+		-- Removes the "MaxFontSize smaller than MinFontSize" error on ALL labels
+		nukeConstraints(revenueLabel)
+		nukeConstraints(avatarLabel)   -- [ADDED]
+		nukeConstraints(usernameLabel) -- [ADDED]
+
 		-- 🔧 AUTO-FIX: SEPARATE "$" FROM NUMBER 🔧
 		if revenueLabel:IsA("TextLabel") then
-
-			-- [[ 🛑 CRITICAL FIX: DELETE CONSTRAINT FIRST ]]
-			-- We destroy the error-causing object BEFORE we do anything else.
-			nukeConstraints(revenueLabel)
-
+			
 			-- Check if we already created the Dollar Label
 			local dollarLabel = revenueGui:FindFirstChild("Dollar-Static")
 
@@ -114,7 +117,6 @@ local function setupTablet(plot)
 				dollarLabel.TextXAlignment = Enum.TextXAlignment.Center
 
 				-- CONFIG 2: The Number
-				-- We can safely resize now because the constraint is gone.
 				revenueLabel.Size = UDim2.new(0.75, 0, 1, 0)
 				revenueLabel.Position = UDim2.new(0.25, 0, 0, 0)
 				revenueLabel.TextXAlignment = Enum.TextXAlignment.Left
