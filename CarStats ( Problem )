@@ -8,7 +8,8 @@ local CarStats = {}
 CarStats.Cars = {
 
 	-- ⬜ COMMON TIERS (The Hook)
-	-- Goal: Fast progression. Players get addicted quickly.
+	-- Goal: Fast progression.
+	-- Players get addicted quickly. [FIXED]
 	-- ====================================================================
 	["Delta"] = { 
 		Name = "Delta",
@@ -48,7 +49,8 @@ CarStats.Cars = {
 	},
 
 	-- 🟩 UNCOMMON TIERS (The Bridge)
-	-- Goal: Keeps them playing. "I can afford this soon."
+	-- Goal: Keeps them playing.
+	-- "I can afford this soon." [FIXED]
 	-- ====================================================================
 	["Raiju"] = {
 		Name = "Nissan Skyline V37",
@@ -82,7 +84,8 @@ CarStats.Cars = {
 	},
 
 	-- 🟦 RARE TIERS (The Mid-Game)
-	-- Goal: Enthusiast cars. Players start feeling "Rich".
+	-- Goal: Enthusiast cars.
+	-- Players start feeling "Rich". [FIXED]
 	-- ====================================================================
 	["Javelin"] = {
 		Name = "Honda Civic Type R (FK8)",
@@ -110,7 +113,8 @@ CarStats.Cars = {
 	},
 
 	-- 🟪 EPIC TIERS (High Performance)
-	-- Goal: The first major grind. Robux spending becomes tempting.
+	-- Goal: The first major grind.
+	-- Robux spending becomes tempting. [FIXED]
 	-- ====================================================================
 	["Sadie"] = {
 		Name = "Nissan GT-R (R35)",
@@ -148,7 +152,8 @@ CarStats.Cars = {
 	},
 
 	-- 🟥 MYTHIC TIERS (The Endgame)
-	-- Goal: The "Chase Item." Keeps players grinding for days/weeks.
+	-- Goal: The "Chase Item."
+	-- Keeps players grinding for days/weeks. [FIXED]
 	-- ====================================================================
 	["Centurion"] = {
 		Name = "Bugatti Chiron",
