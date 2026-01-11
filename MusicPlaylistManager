@@ -1,0 +1,98 @@
+-- [[ LOCAL SCRIPT: MusicPlaylistManager ]]
+-- -- Indicating what the script is for: Manages your specific playlist of 5 songs.
+-- Auto-Pauses when Bank or Inventory opens (using the shared "GameTheme" object).
+
+local SoundService = game:GetService("SoundService")
+
+-- ⚙️ CONFIGURATION
+local GAME_THEME_NAME = "GameTheme" -- MUST match the name used in your Inventory/Bank scripts
+local SHUFFLE_MODE = true           -- Set true to pick random songs, false to play in order
+local MASTER_VOLUME = 0.5           -- The volume for your background music
+
+-- 🎵 YOUR PLAYLIST (Only the 5 IDs you requested)
+local PLAYLIST = {
+    "rbxassetid://1842150151",      
+    "rbxassetid://1836009208",      
+    "rbxassetid://9045765634",      
+    "rbxassetid://132702954752503", 
+    "rbxassetid://1848062261"      
+}
+
+-- ============================================================================
+-- 🛠️ LOGIC
+-- ============================================================================
+
+-- 1. Find or Create the Main Sound Object
+local musicObject = SoundService:FindFirstChild(GAME_THEME_NAME)
+
+if not musicObject then
+	musicObject = Instance.new("Sound")
+	musicObject.Name = GAME_THEME_NAME
+	musicObject.Parent = SoundService
+	musicObject.Volume = MASTER_VOLUME
+end
+
+-- Crucial: Loop must be FALSE so the 'Ended' event fires to let us play the next song.
+musicObject.Looped = false 
+
+local currentTrackIndex = 0
+
+-- 2. Function to Pick the Next Song
+local function getNextTrackId()
+	if #PLAYLIST == 0 then return nil end
+	
+	if SHUFFLE_MODE then
+		-- Pick a random song distinct from the last one (if possible)
+		local newIndex = math.random(1, #PLAYLIST)
+		if #PLAYLIST > 1 then
+			while newIndex == currentTrackIndex do
+				newIndex = math.random(1, #PLAYLIST)
+			end
+		end
+		currentTrackIndex = newIndex
+		return PLAYLIST[newIndex]
+	else
+		-- Sequential Order
+		currentTrackIndex = currentTrackIndex + 1
+		if currentTrackIndex > #PLAYLIST then
+			currentTrackIndex = 1 -- Loop back to start
+		end
+		return PLAYLIST[currentTrackIndex]
+	end
+end
+
+-- 3. Function to Play Music
+local function playNextSong()
+	local nextId = getNextTrackId()
+	if not nextId then 
+		warn("⚠️ MusicPlaylistManager: No songs in PLAYLIST table!")
+		return 
+	end
+	
+	print("🎵 Now Playing: " .. nextId)
+	
+	-- Update the ID on the SAME object
+	musicObject.SoundId = nextId
+	musicObject.TimePosition = 0
+	musicObject.Volume = MASTER_VOLUME -- Reset volume in case it was faded
+	
+	-- Preload to prevent silence gaps
+	if not musicObject.IsLoaded then
+		musicObject.Loaded:Wait()
+	end
+	
+	musicObject:Play()
+end
+
+-- 4. Listen for Song End
+-- When the current song finishes, this event fires automatically.
+musicObject.Ended:Connect(function()
+	task.wait(1) -- Small pause between songs
+	playNextSong()
+end)
+
+-- 5. Start the System
+task.wait(2) -- Wait for game to load
+if not musicObject.IsPlaying then
+	playNextSong()
+end
