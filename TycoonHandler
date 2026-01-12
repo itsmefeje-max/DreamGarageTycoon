@@ -1,8 +1,9 @@
--- [[ SERVER SCRIPT: TycoonHandler (Final Bug-Free) ]]
+-- [[ SERVER SCRIPT: TycoonHandler (Safe Wipe Fix) ]]
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
+-- 🧹 HELPER: Completely reset a plot
 local function wipePlot(plot)
 	if plot:FindFirstChild("Owner") then plot.Owner.Value = "" end
 	local pending = plot:FindFirstChild("PendingEarnings")
@@ -27,13 +28,16 @@ local function wipePlot(plot)
 	end
 end
 
+-- 🏠 ASSIGN PLOT
 local function assignPlot(player)
 	if player:GetAttribute("OccupiedPlot") then return end -- Already has one
 
 	for _, plot in pairs(TycoonFolder:GetChildren()) do
 		local ownerVal = plot:FindFirstChild("Owner")
+		
+		-- ✅ CHECK: Only claim if owner string is empty
 		if ownerVal and ownerVal.Value == "" then
-			-- WIPE BEFORE ASSIGNING
+			-- 🛑 WIPE NOW (Safe time to wipe: right before new owner takes it)
 			wipePlot(plot)
 			
 			ownerVal.Value = player.Name
@@ -64,7 +68,11 @@ Players.PlayerRemoving:Connect(function(player)
 	if plotName then
 		local plot = TycoonFolder:FindFirstChild(plotName)
 		if plot and plot:FindFirstChild("Owner") then
-			plot.Owner.Value = "" -- Release Plot
+			-- ⚠️ ONLY clear the Name. DO NOT call wipePlot() here.
+			-- This leaves the 'PendingEarnings' value intact so TycoonDataHandler can save it.
+			plot.Owner.Value = "" 
+			
+			-- The plot will be wiped by the NEXT player who claims it (in assignPlot)
 			
 			-- QUEUE CHECK: Give to someone waiting
 			task.wait(1)
