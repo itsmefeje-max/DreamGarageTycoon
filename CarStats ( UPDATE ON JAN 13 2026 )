@@ -1,15 +1,16 @@
--- [[ MODULE SCRIPT: CarStats ]]
+-- [[ MODULE SCRIPT: CarStats (Fixed Keys) ]]
 -- LOCATION: ReplicatedStorage > CarStats
 
 local CarStats = {}
 -- ========================================================================
 -- 🚗 VEHICLE DATABASE
 -- ========================================================================
+-- CRITICAL FIX: The ["Key"] must match the "Name" EXACTLY, or the scripts can't find it.
+
 CarStats.Cars = {
 
 	-- ⬜ COMMON TIERS (The Hook)
-	-- Goal: Fast progression.
-	-- Players get addicted quickly. [FIXED]
+	-- Goal: Fast progression. Players get addicted quickly.
 	-- ====================================================================
 	["Delta"] = { 
 		Name = "Delta",
@@ -23,7 +24,7 @@ CarStats.Cars = {
 		Rarity = "Common",
 		Price = 50 -- Very cheap upgrade
 	},
-	["Atom"] = { -- Ensure you have an "Atom" model in the folder!
+	["Atom"] = { 
 		Name = "Atom",
 		CPS = 3, 
 		Rarity = "Common",
@@ -49,34 +50,33 @@ CarStats.Cars = {
 	},
 
 	-- 🟩 UNCOMMON TIERS (The Bridge)
-	-- Goal: Keeps them playing.
-	-- "I can afford this soon." [FIXED]
+	-- Goal: Keeps them playing. "I can afford this soon."
 	-- ====================================================================
-	["Raiju"] = {
+	["Nissan Skyline V37"] = { -- Was ["Raiju"]
 		Name = "Nissan Skyline V37",
 		CPS = 85,
 		Rarity = "Uncommon",
 		Price = 35000 -- $35k
 	},
-	["Ironclad"] = {
+	["Toyota Hilux (2021)"] = { -- Was ["Ironclad"]
 		Name = "Toyota Hilux (2021)",
 		CPS = 100,
 		Rarity = "Uncommon",
 		Price = 45000 -- $45k
 	},
-	["Vapid"] = { -- FIXED: Name matches your Folder (was Vapid-Sadler)
+	["Vapid Sadler"] = { -- Was ["Vapid"]
 		Name = "Vapid Sadler", 
 		CPS = 120,
 		Rarity = "Uncommon",
 		Price = 55000 -- $55k
 	},
-	["Galadriel"] = {
+	["Ford Everest Titanium"] = { -- Was ["Galadriel"]
 		Name = "Ford Everest Titanium",
 		CPS = 145,
 		Rarity = "Uncommon",
 		Price = 70000 -- $70k
 	},
-	["Kingston"] = {
+	["Ford Expedition Platinum"] = { -- Was ["Kingston"]
 		Name = "Ford Expedition Platinum",
 		CPS = 165,
 		Rarity = "Uncommon",
@@ -84,28 +84,27 @@ CarStats.Cars = {
 	},
 
 	-- 🟦 RARE TIERS (The Mid-Game)
-	-- Goal: Enthusiast cars.
-	-- Players start feeling "Rich". [FIXED]
+	-- Goal: Enthusiast cars. Players start feeling "Rich".
 	-- ====================================================================
-	["Javelin"] = {
+	["Honda Civic Type R (FK8)"] = { -- Was ["Javelin"]
 		Name = "Honda Civic Type R (FK8)",
 		CPS = 260,
 		Rarity = "Rare",
 		Price = 150000 -- $150k
 	},
-	["Stuttgart"] = {
+	["Mercedes-Benz A-Class"] = { -- Was ["Stuttgart"]
 		Name = "Mercedes-Benz A-Class",
 		CPS = 310,
 		Rarity = "Rare",
-		Price = 19000 -- $190k
+		Price = 190000 -- ✅ FIXED TYPO: Was 19000, changed to 190000 (190k)
 	},
-	["Maverick"] = {
+	["Corvette C8 Stingray"] = { -- Was ["Maverick"]
 		Name = "Corvette C8 Stingray",
-		CPS = 220, -- Lower CPS than Stuttgart, kept as you requested
+		CPS = 220, 
 		Rarity = "Rare",
-		Price = 210000 -- ✅ FIXED: Corrected to $210k to fit Rare tier
+		Price = 210000 -- $210k
 	},
-	["Velocity"] = {
+	["Toyota Supra Mk4 (A80)"] = { -- Was ["Velocity"]
 		Name = "Toyota Supra Mk4 (A80)",
 		CPS = 360,
 		Rarity = "Rare",
@@ -113,54 +112,51 @@ CarStats.Cars = {
 	},
 
 	-- 🟪 EPIC TIERS (High Performance)
-	-- Goal: The first major grind.
-	-- Robux spending becomes tempting. [FIXED]
+	-- Goal: The first major grind. Robux spending becomes tempting.
 	-- ====================================================================
-	["Sadie"] = {
+	["Nissan GT-R (R35)"] = { -- Was ["Sadie"]
 		Name = "Nissan GT-R (R35)",
 		CPS = 520,
 		Rarity = "Epic",
 		Price = 500000 -- $500k
 	},
-	["Sirene"] = {
+	["Porsche 911 Turbo S"] = { -- Was ["Sirene"]
 		Name = "Porsche 911 Turbo S",
 		CPS = 680,
 		Rarity = "Epic",
 		Price = 750000 -- $750k
 	},
-	["Vortex"] = {
+	["BMW i8 Roadster"] = { -- Was ["Vortex"]
 		Name = "BMW i8 Roadster",
 		CPS = 850,
 		Rarity = "Epic",
-		Price = 1200000 -- $1.2 Million (Price increased to match high CPS)
+		Price = 1200000 -- $1.2 Million
 	},
 
 	-- 🟧 LEGENDARY TIERS (The Dream Cars)
 	-- Goal: Massive status symbols.
 	-- ====================================================================
-	["Yamura"] = {
+	["McLaren Senna"] = { -- Was ["Yamura"]
 		Name = "McLaren Senna",
 		CPS = 1600,
 		Rarity = "Legendary",
-		Price = 15000000 -- $15 Million (Increased for stability)
+		Price = 15000000 -- $15 Million
 	},
-	["La Rossa"] = {
+	["Ferrari Daytona SP3"] = { -- Was ["La Rossa"]
 		Name = "Ferrari Daytona SP3",
 		CPS = 2400,
 		Rarity = "Legendary",
-		Price = 35000000 -- $35 Million (Increased for stability)
+		Price = 35000000 -- $35 Million
 	},
 
 	-- 🟥 MYTHIC TIERS (The Endgame)
-	-- Goal: The "Chase Item."
-	-- Keeps players grinding for days/weeks. [FIXED]
+	-- Goal: The "Chase Item." Keeps players grinding for days/weeks.
 	-- ====================================================================
-	["Centurion"] = {
+	["Bugatti Chiron"] = { -- Was ["Centurion"]
 		Name = "Bugatti Chiron",
 		CPS = 5500, 
 		Rarity = "Mythic",
 		Price = 150000000 -- $150 MILLION
-		-- Note: At 2400 CPS (previous car), this takes ~17 HOURS of gameplay.
 	}
 }
 
