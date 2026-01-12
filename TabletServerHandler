@@ -1,4 +1,4 @@
--- [[ SERVER SCRIPT: TabletServerHandler (Fixed Owner Display) ]]
+-- [[ SERVER SCRIPT: TabletServerHandler (Final Secure Edition) ]]
 -- -- Indicating what the script is for: Handles Tablet Owner Info, Secure Claiming, Cooldowns & SFX.
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -94,7 +94,7 @@ local function setupTablet(plot)
 		mainPart.Anchored = true; mainPart.CanCollide = true; mainPart.Velocity = Vector3.zero
 		claimPart.Anchored = true; claimPart.CanCollide = true; claimPart.Velocity = Vector3.zero
 
-		-- 2. RESTORED: GET AVATAR & USERNAME GUIS
+		-- 2. GET AVATAR & USERNAME GUIS
 		local avatarGui = mainPart:WaitForChild("AvatarGUI", 10)
 		local usernameGui = mainPart:WaitForChild("UsernameGUI", 10)
 
@@ -139,7 +139,7 @@ local function setupTablet(plot)
 			end
 		end
 
-		-- 4. RESTORED: UPDATE FUNCTIONS
+		-- 4. UPDATE FUNCTIONS
 		local function updateOwnerInfo()
 			local playerName = ownerVal.Value
 			if playerName and playerName ~= "" then
@@ -219,26 +219,41 @@ TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
 end)
 
 -- ============================================================================
--- 💰 DEV PRODUCT PROCESSOR
+-- 💰 DEV PRODUCT PROCESSOR (SAFE MODE FIX)
 -- ============================================================================
 MarketplaceService.ProcessReceipt = function(receiptInfo)
 	if receiptInfo.ProductId == DEV_PRODUCT_ID then
 		local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
-		if not player then return Enum.ProductPurchaseDecision.PurchaseGranted end
+		
+		-- 🛑 CRITICAL FIX: If player crashed/left, DO NOT mark as done.
+		-- Roblox will try again when they rejoin so they don't lose Robux.
+		if not player then 
+			return Enum.ProductPurchaseDecision.NotProcessedYet 
+		end
 
 		local myPlotName = player:GetAttribute("OccupiedPlot")
 		local plot = TycoonFolder:FindFirstChild(myPlotName or "")
 
+		-- Only process if they have a plot with earnings
 		if plot and plot:FindFirstChild("PendingEarnings") then
 			local pendingVal = plot.PendingEarnings
 			local amount = pendingVal.Value
+			
 			if amount > 0 then
 				pendingVal.Value = 0
 				local ls = player:FindFirstChild("leaderstats")
-				if ls and ls:FindFirstChild("Cash") then ls.Cash.Value += (amount * 2) end
+				if ls and ls:FindFirstChild("Cash") then 
+					ls.Cash.Value += (amount * 2) 
+				end
 			end
+			-- Transaction Successful
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		else
+			-- Player is online but has no plot/earnings? 
+			-- We grant it to prevent an infinite loop of errors.
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
+	
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
