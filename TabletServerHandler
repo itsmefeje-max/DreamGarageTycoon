@@ -1,5 +1,6 @@
--- [[ SERVER SCRIPT: TabletServerHandler (Final Secure Edition) ]]
--- -- Indicating what the script is for: Handles Tablet Owner Info, Secure Claiming, Cooldowns & SFX.
+-- [[ SERVER SCRIPT: TabletServerHandler (Secure & Fixed) ]]
+-- -- Indicating what the script is for: Handles Tablet Owner Info, Secure Claiming, Cooldowns, SFX, and Safe DevProduct Processing.
+
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -219,14 +220,14 @@ TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
 end)
 
 -- ============================================================================
--- 💰 DEV PRODUCT PROCESSOR (SAFE MODE FIX)
+-- 💰 DEV PRODUCT PROCESSOR (SECURE & FIXED)
 -- ============================================================================
 MarketplaceService.ProcessReceipt = function(receiptInfo)
 	if receiptInfo.ProductId == DEV_PRODUCT_ID then
 		local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
 		
-		-- 🛑 CRITICAL FIX: If player crashed/left, DO NOT mark as done.
-		-- Roblox will try again when they rejoin so they don't lose Robux.
+		-- 1. Player Crashed/Left? Retry later.
+		-- Logic: If we return 'PurchaseGranted' now, they lose Robux and get nothing.
 		if not player then 
 			return Enum.ProductPurchaseDecision.NotProcessedYet 
 		end
@@ -234,23 +235,27 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		local myPlotName = player:GetAttribute("OccupiedPlot")
 		local plot = TycoonFolder:FindFirstChild(myPlotName or "")
 
-		-- Only process if they have a plot with earnings
-		if plot and plot:FindFirstChild("PendingEarnings") then
-			local pendingVal = plot.PendingEarnings
-			local amount = pendingVal.Value
-			
-			if amount > 0 then
-				pendingVal.Value = 0
-				local ls = player:FindFirstChild("leaderstats")
-				if ls and ls:FindFirstChild("Cash") then 
-					ls.Cash.Value += (amount * 2) 
-				end
+		-- 2. Player Online, but Plot not loaded yet?
+		-- Logic: Wait for the plot to load. Returning 'NotProcessedYet' makes Roblox try again automatically.
+		if not plot or not plot:FindFirstChild("PendingEarnings") then
+			warn("⏳ Transaction Delayed: " .. player.Name .. " has no plot loaded yet.")
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+
+		local pendingVal = plot.PendingEarnings
+		local amount = pendingVal.Value
+		
+		if amount > 0 then
+			pendingVal.Value = 0
+			local ls = player:FindFirstChild("leaderstats")
+			if ls and ls:FindFirstChild("Cash") then 
+				ls.Cash.Value += (amount * 2) 
 			end
 			-- Transaction Successful
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		else
-			-- Player is online but has no plot/earnings? 
-			-- We grant it to prevent an infinite loop of errors.
+			-- 3. Edge Case: Player has a plot, but $0 earnings.
+			-- We MUST grant the purchase here, or Roblox will retry infinitely for a transaction that will never do anything.
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
