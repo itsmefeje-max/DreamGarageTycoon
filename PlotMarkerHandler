@@ -1,6 +1,6 @@
--- [[ LOCAL SCRIPT: PlotMarkerHandler (Universal V3) ]]
--- -- Indicating what the script is for: Attaches "YOUR PLOT" marker to a universal part.
--- TARGET: NormalGarage > Garage Parts > OwnerIndicator
+-- [[ LOCAL SCRIPT: PlotMarkerHandler (Universal V4 - Robust Edition) ]]
+-- -- Indicating what the script is for: Attaches "YOUR PLOT" marker to a universal part (Guaranteed Fix).
+-- FEATURES: Uses Smart-Waiting to ensure it works even if the plot loads slowly.
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -14,17 +14,17 @@ local TycoonFolder = Workspace:WaitForChild("Tycoons")
 -- ⚙️ CONFIGURATION
 -- ============================================================================
 local INDICATOR_TEMPLATE_NAME = "YourPlotIndicator" -- Name of GUI in ReplicatedStorage
-local HEIGHT_OFFSET = 1      -- Studs above the part (Adjust this if too low/high)
-local ANIMATE_BOUNCE = true    -- Bobbing animation
+local HEIGHT_OFFSET = 12      -- Studs above the part (High enough to be seen)
+local ANIMATE_BOUNCE = true   -- Bobbing animation
 local BOUNCE_SPEED = 2
 local BOUNCE_HEIGHT = 1.5
 
 -- 🎯 TARGET PATHS (Priority List)
--- The script will try to find #1. If missing, it tries #2, etc.
+-- The script will wait for #1. If it times out, it tries #2, etc.
 local TARGET_PATHS = {
-	{ "NormalGarage", "Garage Parts", "OwnerIndicator" }, -- 🥇 Your requested universal part
-	{ "NormalGarage", "GarageInformation", "OwnerLabel" }, -- 🥈 Old fallback
-	{ "SpawnPoint" } -- 🥉 Last resort
+	{ "NormalGarage", "Garage Parts", "OwnerIndicator" },   -- 🥇 Your requested universal part
+	{ "NormalGarage", "GarageInformation", "OwnerLabel" },  -- 🥈 Old fallback
+	{ "SpawnPoint" }                                        -- 🥉 Last resort (Always exists)
 }
 
 -- ============================================================================
@@ -32,12 +32,15 @@ local TARGET_PATHS = {
 -- ============================================================================
 local currentIndicator = nil
 local bounceConnection = nil
+local isSearching = false -- Prevents overlapping searches
 
--- Helper to safely find a nested part
+-- Helper to safely find a nested part with PATIENCE
 local function findPartByPath(root, pathArray)
 	local current = root
 	for _, name in ipairs(pathArray) do
-		current = current:FindFirstChild(name)
+		-- 🛡️ CRITICAL FIX: Use WaitForChild with a timeout (2s)
+		-- This gives the game time to load the part if it's streaming in.
+		current = current:WaitForChild(name, 2)
 		if not current then return nil end
 	end
 	return current
@@ -49,22 +52,35 @@ local function cleanup()
 end
 
 local function updateMarker()
+	-- Prevent double-running
+	if isSearching then return end
+	isSearching = true
+
 	cleanup() -- Reset first
 
 	-- 1. Get Assigned Plot
 	local myPlotName = player:GetAttribute("OccupiedPlot")
-	if not myPlotName then return end
+	if not myPlotName then 
+		isSearching = false
+		return 
+	end
 
 	local plot = TycoonFolder:FindFirstChild(myPlotName)
-	if not plot then return end
+	if not plot then 
+		-- Plot might not be loaded yet, retry in 1s
+		isSearching = false
+		task.wait(1)
+		updateMarker()
+		return 
+	end
 
-	-- 2. Find Best Target Part
+	-- 2. Find Best Target Part (With Waiting)
 	local attachPart = nil
 
-	for _, path in ipairs(TARGET_PATHS) do
+	for i, path in ipairs(TARGET_PATHS) do
 		attachPart = findPartByPath(plot, path)
 		if attachPart then 
-			print("📍 Marker attaching to: " .. table.concat(path, " > "))
+			print("📍 PlotMarker: Found target via Path #" .. i .. " (" .. attachPart.Name .. ")")
 			break 
 		end
 	end
@@ -74,12 +90,18 @@ local function updateMarker()
 		local template = ReplicatedStorage:FindFirstChild(INDICATOR_TEMPLATE_NAME)
 		if not template then 
 			warn("⚠️ PlotMarker: Missing '"..INDICATOR_TEMPLATE_NAME.."' in ReplicatedStorage!") 
+			isSearching = false
 			return 
 		end
 
 		currentIndicator = template:Clone()
 		currentIndicator.Parent = player.PlayerGui
 		currentIndicator.Adornee = attachPart
+
+		-- Ensure it's always on top if needed
+		if currentIndicator:IsA("BillboardGui") then
+			currentIndicator.AlwaysOnTop = true
+		end
 
 		-- Set Initial Height
 		local currentOffset = currentIndicator.StudsOffset
@@ -98,12 +120,23 @@ local function updateMarker()
 			end)
 		end
 	else
-		-- Retry if plot is loading (StreamingEnabled support)
-		task.delay(1, updateMarker)
+		-- ⚠️ STILL NOT FOUND? RETRY.
+		-- This happens if the Garage hasn't been built/loaded yet.
+		-- We keep trying every 2 seconds until it appears.
+		print("⏳ PlotMarker: Target part not found yet. Retrying...")
+		task.delay(2, function()
+			isSearching = false
+			updateMarker()
+		end)
+		return -- Exit so we don't set isSearching=false immediately
 	end
+
+	isSearching = false
 end
 
 -- 🔄 AUTO-UPDATE
 player:GetAttributeChangedSignal("OccupiedPlot"):Connect(updateMarker)
-task.wait(2) -- Startup delay
+
+-- Startup Check
+task.wait(2) 
 updateMarker()
