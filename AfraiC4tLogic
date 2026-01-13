@@ -1,47 +1,47 @@
--- [[ LOCAL SCRIPT: AfraiC4tLogic ]]
--- -- Indicating what the script is for: Handles Camera and Logic for AfraiC4t, using YOUR custom UI.
+-- [[ LOCAL SCRIPT: AfraiC4t_ATM_Controller ]]
+-- -- Indicating what the script is for: Handles Camera & UI Logic EXCLUSIVELY for the ATM NPC (AfraiC4t).
 -- LOCATION: StarterPlayer > StarterPlayerScripts
 
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- ============================================================================
--- ⚙️ CONFIGURATION (Must match your GUI & NPC)
+-- 🆔 UNIQUE IDENTIFIERS (Must match your GUI exactly)
 -- ============================================================================
--- 1. NPC Settings
-local NPC_FOLDER_NAME = "NPCS"
-local NPC_NAME = "AfraiC4t"            
-local CAMERA_PART_NAME = "CameraAimPart" 
-local PROMPT_NAME = "ProximityPrompt"    
+local GUI_ID = "UI_NPC_ATM_AfraiC4t"          -- The specific ScreenGui for ATM
+local CONTAINER_ID = "Frame_ATM_Container"    -- The Frame inside
+local TEXT_ID = "Text_ATM_Dialogue"           -- The TextLabel inside
+local BTN_WITHDRAW_ID = "Btn_ATM_Withdraw"    -- Button 1
+local BTN_INQUIRY_ID = "Btn_ATM_Inquiry"      -- Button 2
+local BTN_LEAVE_ID = "Btn_ATM_Leave"          -- Button 3
 
--- 2. YOUR GUI NAMES (Make sure your GUI matches these!)
-local GUI_NAME = "ATM_NPC_GUI"         -- The ScreenGui you made
-local CONTAINER_NAME = "MainFrame"     -- The Frame holding everything
-local TEXT_LABEL_NAME = "DialogueText" -- The TextLabel for NPC speech
-local BTN_1_NAME = "Option1"           -- Withdraw Button
-local BTN_2_NAME = "Option2"           -- Inquiry Button
-local BTN_3_NAME = "Option3"           -- Leave Button
+-- 📍 NPC CONFIGURATION
+local NPC_FOLDER = "NPCS"
+local TARGET_NPC = "AfraiC4t"                 -- Specific NPC Name
+local CAMERA_PART = "CameraAimPart"           -- Invisible part inside NPC
+local PROMPT_NAME = "ProximityPrompt"
 
--- 3. Visuals
+-- 🎥 CAMERA SETTINGS
 local TWEEN_INFO = TweenInfo.new(1.2, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
-local BLUR_SIZE = 15 
+local BLUR_SIZE = 15
 
 -- ============================================================================
--- 🛠️ SETUP & VARIABLES
+-- 🛠️ STATE VARIABLES
 -- ============================================================================
-local isTalking = false
+local isInteracting = false
 local controls = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
 local blurEffect = Instance.new("BlurEffect", camera)
 blurEffect.Size = 0
 blurEffect.Enabled = false
 
--- Event for the Bank Script
+-- 📡 EVENT SIGNAL (The "Doorbell" for the Bank Script)
 local OpenATMEvent = ReplicatedStorage:FindFirstChild("OpenATMEvent")
 if not OpenATMEvent then
 	OpenATMEvent = Instance.new("BindableEvent")
@@ -53,19 +53,20 @@ end
 -- 🎬 INTERACTION FUNCTIONS
 -- ============================================================================
 
-local function endInteraction()
-	if not isTalking then return end
+local function stopInteraction()
+	if not isInteracting then return end
 	
-	-- 1. Find your GUI and Hide it
-	local myGui = playerGui:FindFirstChild(GUI_NAME)
+	-- 1. Close the Specific ATM GUI
+	local myGui = playerGui:FindFirstChild(GUI_ID)
 	if myGui then
-		myGui.Enabled = false -- Close the container
+		myGui.Enabled = false
 	end
 
-	-- 2. Restore Camera & Controls
+	-- 2. Reset Camera & Blur
 	camera.CameraType = Enum.CameraType.Custom
 	TweenService:Create(blurEffect, TWEEN_INFO, {Size = 0}):Play()
 	
+	-- 3. Unfreeze Player
 	if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
 		player.Character.HumanoidRootPart.Anchored = false
 	end
@@ -73,119 +74,121 @@ local function endInteraction()
 	
 	task.wait(0.5)
 	blurEffect.Enabled = false
-	isTalking = false
+	isInteracting = false
 end
 
 local function startInteraction(npcModel)
-	if isTalking then return end
-	isTalking = true
+	if isInteracting then return end
+	isInteracting = true
 
-	-- 1. Camera Logic
-	local camPart = npcModel:FindFirstChild(CAMERA_PART_NAME)
+	-- 1. Locate Camera Target
+	local camPart = npcModel:FindFirstChild(CAMERA_PART)
 	if not camPart then
-		warn("❌ Logic Error: Missing '"..CAMERA_PART_NAME.."' inside AfraiC4t!")
-		isTalking = false
+		warn("❌ ATM Error: Missing '"..CAMERA_PART.."' inside " .. npcModel.Name)
+		isInteracting = false
 		return
 	end
 
-	-- Freeze Player
+	-- 2. Freeze Player
 	if controls then controls:Disable() end
 	if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
 		player.Character.HumanoidRootPart.Anchored = true 
 	end
 
-	-- Move Camera
+	-- 3. Cinematic Camera Move
 	camera.CameraType = Enum.CameraType.Scriptable
 	blurEffect.Enabled = true
 	TweenService:Create(blurEffect, TWEEN_INFO, {Size = BLUR_SIZE}):Play()
 	TweenService:Create(camera, TWEEN_INFO, {CFrame = camPart.CFrame}):Play()
 
-	-- 2. OPEN YOUR CONTAINER
-	local myGui = playerGui:WaitForChild(GUI_NAME, 5)
+	-- 4. ACTIVATE SPECIFIC ATM GUI
+	local myGui = playerGui:WaitForChild(GUI_ID, 5)
 	if not myGui then
-		warn("❌ UI Error: Could not find ScreenGui named '" .. GUI_NAME .. "' in PlayerGui.")
-		endInteraction()
+		warn("❌ ATM Error: Could not find ScreenGui named '" .. GUI_ID .. "'")
+		stopInteraction()
 		return
 	end
 
-	local mainFrame = myGui:FindFirstChild(CONTAINER_NAME)
-	if not mainFrame then
-		warn("❌ UI Error: Could not find Frame named '" .. CONTAINER_NAME .. "' inside " .. GUI_NAME)
+	local container = myGui:FindFirstChild(CONTAINER_ID)
+	if not container then
+		warn("❌ ATM Error: Could not find Frame named '" .. CONTAINER_ID .. "'")
+		stopInteraction()
 		return
 	end
 
 	-- Reset Text
-	local dialogueLabel = mainFrame:FindFirstChild(TEXT_LABEL_NAME)
-	if dialogueLabel then
-		dialogueLabel.Text = "Welcome. I handle the ATM services. How can I help?"
+	local dialogue = container:FindFirstChild(TEXT_ID)
+	if dialogue then
+		dialogue.Text = "Greetings. I handle the ATM withdrawals. How may I assist you?"
 	end
 
-	-- 3. CONNECT YOUR BUTTONS
-	-- We disconnect old connections to prevent double-clicking issues
-	for _, btnName in pairs({BTN_1_NAME, BTN_2_NAME, BTN_3_NAME}) do
-		local btn = mainFrame:FindFirstChild(btnName)
+	-- 5. CONNECT BUTTONS (Refresh connections safely)
+	-- We clone buttons to strip old connections from previous interactions
+	local function refreshButton(btnName)
+		local btn = container:FindFirstChild(btnName)
 		if btn then
-			-- Remove old connections (simple way)
 			local newBtn = btn:Clone()
 			newBtn.Parent = btn.Parent
 			btn:Destroy()
-			btn = newBtn -- refresh variable
+			return newBtn
 		end
+		return nil
 	end
 
-	-- Re-find buttons after refresh
-	local btn1 = mainFrame:FindFirstChild(BTN_1_NAME) -- Withdraw
-	local btn2 = mainFrame:FindFirstChild(BTN_2_NAME) -- Info
-	local btn3 = mainFrame:FindFirstChild(BTN_3_NAME) -- Leave
+	local btnWithdraw = refreshButton(BTN_WITHDRAW_ID)
+	local btnInquiry = refreshButton(BTN_INQUIRY_ID)
+	local btnLeave = refreshButton(BTN_LEAVE_ID)
 
-	-- OPTION 1: WITHDRAW
-	if btn1 then
-		btn1.MouseButton1Click:Connect(function()
-			endInteraction() -- Close dialogue first
-			print("🏧 Opening ATM Bank UI...")
-			OpenATMEvent:Fire() -- Triggers the Bank Script
+	-- [[ LOGIC: WITHDRAW ]]
+	if btnWithdraw then
+		btnWithdraw.MouseButton1Click:Connect(function()
+			print("🏧 Choice: Withdraw Selected.")
+			stopInteraction()    -- Close NPC Camera
+			OpenATMEvent:Fire()  -- 🔔 RING THE BELL for Bank Script
 		end)
 	end
 
-	-- OPTION 2: INQUIRY (The "Other" Choice)
-	if btn2 then
-		btn2.MouseButton1Click:Connect(function()
-			if dialogueLabel then
-				-- Typewriter effect or instant text change
-				dialogueLabel.Text = "I ensure your cash is safe. You can withdraw your Tycoon earnings here to spend in the city."
+	-- [[ LOGIC: INQUIRY ]]
+	if btnInquiry then
+		btnInquiry.MouseButton1Click:Connect(function()
+			if dialogue then
+				dialogue.Text = "We offer secure transfers from your Tycoon balance directly to your wallet."
 			end
 		end)
 	end
 
-	-- OPTION 3: LEAVE
-	if btn3 then
-		btn3.MouseButton1Click:Connect(function()
-			endInteraction()
+	-- [[ LOGIC: LEAVE ]]
+	if btnLeave then
+		btnLeave.MouseButton1Click:Connect(function()
+			stopInteraction()
 		end)
 	end
 
-	-- Show GUI
+	-- Finally, Show the UI
 	myGui.Enabled = true
 end
 
 -- ============================================================================
 -- ⚡ INITIALIZATION
 -- ============================================================================
-local function setupNPC()
-	local folder = Workspace:WaitForChild(NPC_FOLDER_NAME)
-	local npc = folder:WaitForChild(NPC_NAME, 10)
+local function setupATM()
+	-- Strictly look in Workspace > NPCS > AfraiC4t
+	local folder = Workspace:WaitForChild(NPC_FOLDER)
+	local npc = folder:WaitForChild(TARGET_NPC, 10)
 
 	if npc then
 		local prompt = npc:FindFirstChild(PROMPT_NAME) or npc:FindFirstChildWhichIsA("ProximityPrompt", true)
 		if prompt then
-			print("✅ AfraiC4t Logic Connected.")
+			print("✅ ATM Controller: Connected to " .. TARGET_NPC)
 			prompt.Triggered:Connect(function()
 				startInteraction(npc)
 			end)
+		else
+			warn("⚠️ ATM Warning: No ProximityPrompt found in " .. TARGET_NPC)
 		end
 	else
-		warn("❌ Could not find AfraiC4t in Workspace.")
+		warn("❌ ATM Error: Could not find NPC '" .. TARGET_NPC .. "' in " .. NPC_FOLDER)
 	end
 end
 
-setupNPC()
+setupATM()
