@@ -1,5 +1,5 @@
--- [[ LOCAL SCRIPT: Bank UI - SFX Only ]]
--- -- Indicating what the script is for: Handles Bank UI logic with SFX but NO specific background music.
+-- [[ LOCAL SCRIPT: Bank UI - SFX Only (Final Verified) ]]
+-- -- Indicating what the script is for: Handles Bank UI with SFX, Movement Lock, but NO Background Music.
 print("---------------------------------------------------------")
 print("🛠️ STARTING BANK UI SCRIPT (SFX ONLY)...")
 
@@ -54,7 +54,7 @@ local HOVER_TWEEN = TweenInfo.new(0.2)
 local NORMAL_COLOR = Color3.fromRGB(255, 255, 255) 
 local DIM_COLOR = Color3.fromRGB(200, 200, 200)   
 
--- 🔊 SOUND IDS (SFX Only)
+-- 🔊 SOUND IDS (SFX Only - Music Removed)
 local SOUND_ID = "rbxassetid://9083627113" 
 
 -- 🛡️ TRACKING VARIABLES
@@ -85,7 +85,7 @@ local function playSfx(soundId, volume)
 	local s = Instance.new("Sound")
 	s.SoundId = soundId
 	s.Volume = volume or 0.5
-	s.Parent = openButton -- Parent to GUI ensures reliability
+	s.Parent = openButton 
 	s:Play()
 	game.Debris:AddItem(s, 3)
 end
@@ -159,14 +159,10 @@ local function setFocusMode(isFocused)
 	if isFocused then
 		mainWindow.Visible = true
 		if transferFrame then transferFrame.Visible = false end
-
-		-- 👁️ Hide others
 		toggleOtherGuis(true)
 	else
 		mainWindow.Visible = false
 		if transferFrame then transferFrame.Visible = false end
-
-		-- 👁️ Show others
 		toggleOtherGuis(false)
 	end
 
@@ -185,9 +181,8 @@ end
 -- 🟢 OPEN LOGIC
 -- ============================================================================
 openButton.MouseButton1Click:Connect(function()
-	playSfx(SOUND_ID, 0.5) -- ✅ SFX Stays
+	playSfx(SOUND_ID, 0.5) 
 
-	-- 1. UI LOGIC (Music removed)
 	local colorHex = getRandomHex()
 	greetingLabel.Text = "<font color='#" .. colorHex .. "'>" .. player.Name .. "</font>"
 	updateDisplay()
@@ -201,16 +196,15 @@ end)
 local function performClose()
 	setFocusMode(false)
 	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = NORMAL_FOV}):Play()
-	-- (Music fade out logic removed)
 end
 
 closeButton.MouseButton1Click:Connect(function() 
-	playSfx(SOUND_ID, 0.5) -- ✅ SFX Stays
+	playSfx(SOUND_ID, 0.5) 
 	performClose()
 end) 
 
 detector.MouseButton1Click:Connect(function()
-	playSfx(SOUND_ID, 0.5) -- Optional: Click sound when clicking outside
+	playSfx(SOUND_ID, 0.5) 
 	performClose()
 end)
 
