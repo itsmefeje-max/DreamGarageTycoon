@@ -1,124 +1,198 @@
--- [[ LOCAL SCRIPT: WithdrawLogic (Final Step: Send to NPC) ]]
--- -- Indicating what the script is for: Handles Tablet input and sends money to the ATM (NPC) for pickup.
+-- [[ LOCAL SCRIPT: AfraiC4tLogic (Step 2: Smart NPC) ]]
+-- -- Indicating what the script is for: Handles NPC interaction. Switches button between "Access Bank" and "Dispense Cash".
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 
 local player = Players.LocalPlayer
-local withdrawBtn = script.Parent
-
--- 🔍 ROBUST FINDER: Finds the Main GUI even if you moved the button
--- This prevents the "attempt to index nil" errors you had before.
-local mainScreenGui = withdrawBtn:FindFirstAncestorWhichIsA("ScreenGui")
-local amountInput = mainScreenGui and mainScreenGui:FindFirstChild("AmountInput", true) 
-local VerifyLabel = mainScreenGui and mainScreenGui:FindFirstChild("VerifyLabel", true)
-local SuccessLabel = mainScreenGui and mainScreenGui:FindFirstChild("SuccessLabel", true)
-local ErrorLabel = mainScreenGui and mainScreenGui:FindFirstChild("ErrorLabel", true)
-
--- 📡 EVENTS
-local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent", 10)
-
--- 🔊 SOUNDS
-local SUCCESS_SOUND = "rbxassetid://140072726814802"
-local ERROR_SOUND = "rbxassetid://3779045779"
+local camera = Workspace.CurrentCamera
+local playerGui = player:WaitForChild("PlayerGui")
 
 -- ============================================================================
--- 🧠 SMART INPUT PARSER (k, m, all, commas)
+-- 🆔 CONFIGURATION
 -- ============================================================================
-local function parseAmount(text)
-	if not text then return 0 end
-	text = text:lower()
+local GUI_ID = "UI_NPC_ATM_AfraiC4t"       
+local CONTAINER_ID = "Frame_ATM_Container" 
+local TEXT_ID = "Text_ATM_Dialogue"        
+local BTN_MAIN_ID = "Btn_ATM_Withdraw" -- This single button does both jobs now
+local BTN_LEAVE_ID = "Btn_ATM_Leave"       
 
-	-- Handle "All" or "Max"
-	if text == "all" or text == "max" then
-		if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
-			return player.leaderstats.Cash.Value
-		end
-		return 0
-	end
+local NPC_FOLDER = "NPCS"
+local TARGET_NPC = "AfraiC4t"
+local CAMERA_PART = "CameraAimPart"
+local PROMPT_NAME = "TalkPrompt" 
 
-	-- Remove commas
-	text = text:gsub(",", "")
+local TWEEN_INFO = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TYPING_SOUND = "rbxassetid://4676738150"
+local CASH_SOUND = "rbxassetid://140072726814802"
 
-	-- Handle Suffixes (k, m, b)
-	local multiplier = 1
-	if text:match("k") then multiplier = 1000 end
-	if text:match("m") then multiplier = 1000000 end
-	if text:match("b") then multiplier = 1000000000 end
-
-	-- Extract Number
-	local cleanNum = tonumber(text:match("[%d%.]+"))
-	if cleanNum then
-		return math.floor(cleanNum * multiplier)
-	end
-
-	return 0
-end
+-- 📡 EVENTS (Wait for the ones TransactionHandler created)
+local DispenseEvent = ReplicatedStorage:WaitForChild("DispenseEvent", 10)
+local OpenATMEvent = ReplicatedStorage:WaitForChild("OpenATMEvent", 5) 
+-- Note: If OpenATMEvent is missing, the Bank script creates it, but we wait just in case.
 
 -- ============================================================================
--- 🎬 ANIMATIONS
+-- 🛠️ STATE VARIABLES
 -- ============================================================================
-local function playSound(id)
-	local s = Instance.new("Sound", SoundService); s.SoundId = id; s.Volume = 0.5; s:Play(); game.Debris:AddItem(s, 2)
-end
+local isInteracting = false
+local currentDialogueJob = nil 
+local buttonConnections = {} -- To store click events so we can clear them later
+local controls = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
 
-local function showFeedback(label)
+-- ============================================================================
+-- 🎬 HELPER FUNCTIONS
+-- ============================================================================
+local function typewrite(label, text)
 	if not label then return end
-	label.Visible = true
-	label.TextTransparency = 0
-	task.wait(2)
-	for i = 0, 1, 0.1 do
-		label.TextTransparency = i
-		task.wait(0.05)
+	if currentDialogueJob then task.cancel(currentDialogueJob) end
+	label.Text = "" 
+
+	currentDialogueJob = task.spawn(function()
+		for i = 1, #text do
+			if not isInteracting then break end
+			label.Text = string.sub(text, 1, i)
+			if i % 3 == 0 then 
+				local s = Instance.new("Sound", SoundService); s.SoundId = TYPING_SOUND; s.Volume = 0.1; s:Play(); game.Debris:AddItem(s, 1)
+			end
+			task.wait(0.02)
+		end
+	end)
+end
+
+local function clearConnections()
+	for _, conn in pairs(buttonConnections) do
+		if conn then conn:Disconnect() end
 	end
-	label.Visible = false
+	buttonConnections = {}
 end
 
 -- ============================================================================
--- 🟢 MAIN CLICK LOGIC
+-- 🧠 THE LOGIC: BUTTON UPDATE
 -- ============================================================================
-withdrawBtn.MouseButton1Click:Connect(function()
-	-- 1. Validate Input Box
-	if not amountInput then 
-		warn("❌ Error: Cannot find 'AmountInput' text box.") 
-		return 
-	end
+local function updateMainButton(btn, dialogueLabel)
+	-- 1. CLEANUP OLD CLICKS
+	-- We must disconnect old clicks so it doesn't try to "Withdraw" AND "Dispense" at the same time.
+	local oldCons = btn:GetAttribute("ActiveConnections")
+	-- (Simple version: we just clear ALL connections globally in clearConnections before calling this)
 
-	-- 2. Parse the Number
-	local amount = parseAmount(amountInput.Text)
-	local bank = 0
-	if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
-		bank = player.leaderstats.Cash.Value
-	end
+	-- 2. CHECK PENDING MONEY
+	local pending = player:GetAttribute("PendingATM") or 0
+	local btnLabel = btn:FindFirstChild("TextLabel") or btn
 
-	-- 3. Check Funds
-	if amount > 0 and amount <= bank then
-		-- ✅ VALID: Send to ATM
-		if withdrawEvent then
-			withdrawEvent:FireServer(amount) -- This goes to TransactionHandler
+	if pending > 0 then
+		-- 🟢 MODE: DISPENSE (Pickup Cash)
+		if btnLabel then btnLabel.Text = "DISPENSE ($" .. pending .. ")" end
+		btn.BackgroundColor3 = Color3.fromRGB(85, 255, 127) -- Green
 
-			print("📤 Sent $" .. amount .. " to NPC for pickup.")
-			playSound(SUCCESS_SOUND)
+		if dialogueLabel then typewrite(dialogueLabel, "Funds verified. Ready for collection.") end
 
-			-- Visual Feedback
-			amountInput.Text = "SENT TO ATM!"
-			if SuccessLabel then task.spawn(function() showFeedback(SuccessLabel) end) end
+		local con = btn.MouseButton1Click:Connect(function()
+			-- A. Fire Server to give money
+			if DispenseEvent then DispenseEvent:FireServer() end
 
+			-- B. FX
+			local s = Instance.new("Sound", SoundService); s.SoundId = CASH_SOUND; s.Volume = 0.5; s:Play(); game.Debris:AddItem(s, 2)
+			if btnLabel then btnLabel.Text = "Dispensing..." end
+
+			-- C. Wait a moment, then close or refresh
 			task.wait(1)
-			amountInput.Text = ""
-		else
-			warn("❌ Critical: WithdrawEvent not found!")
-		end
-	else
-		-- ❌ INVALID: Not enough money or bad number
-		print("❌ Invalid Amount or Insufficient Funds")
-		playSound(ERROR_SOUND)
+			-- The Attribute will change to 0 automatically, re-triggering this update if we wanted.
+			-- But usually, we just close the UI after pickup:
+			isInteracting = false
+			local myGui = playerGui:FindFirstChild(GUI_ID)
+			if myGui then myGui.Enabled = false end
+			camera.CameraType = Enum.CameraType.Custom
+			controls:Enable()
+		end)
+		table.insert(buttonConnections, con)
 
-		if ErrorLabel then task.spawn(function() showFeedback(ErrorLabel) end) end
-		amountInput.Text = "Error"
-		task.wait(1)
-		amountInput.Text = ""
+	else
+		-- ⚪ MODE: ACCESS ACCOUNT (Open Bank)
+		if btnLabel then btnLabel.Text = "ACCESS ACCOUNT" end
+		btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255) -- White
+
+		if dialogueLabel then typewrite(dialogueLabel, "Welcome. Access digital vault?") end
+
+		local con = btn.MouseButton1Click:Connect(function()
+			-- A. Open Bank UI
+			if OpenATMEvent then 
+				OpenATMEvent:Fire() 
+			else
+				-- Fallback if event is missing
+				local evt = Instance.new("BindableEvent"); evt.Name = "OpenATMEvent"; evt.Parent = ReplicatedStorage
+				evt:Fire()
+			end
+
+			-- B. Close NPC UI
+			isInteracting = false
+			local myGui = playerGui:FindFirstChild(GUI_ID)
+			if myGui then myGui.Enabled = false end
+			camera.CameraType = Enum.CameraType.Custom
+			controls:Enable()
+		end)
+		table.insert(buttonConnections, con)
 	end
-end)
+end
+
+-- ============================================================================
+-- 🎥 START INTERACTION
+-- ============================================================================
+local function startInteraction(npc)
+	if isInteracting then return end
+	isInteracting = true
+	clearConnections() -- Reset buttons
+
+	-- 1. Camera
+	local camPart = npc:FindFirstChild(CAMERA_PART)
+	if camPart then
+		camera.CameraType = Enum.CameraType.Scriptable
+		TweenService:Create(camera, TWEEN_INFO, {CFrame = camPart.CFrame}):Play()
+	end
+	controls:Disable()
+
+	-- 2. Show GUI
+	local myGui = playerGui:WaitForChild(GUI_ID, 5)
+	if not myGui then return end
+	myGui.Enabled = true
+
+	local container = myGui:FindFirstChild(CONTAINER_ID, true)
+	if container then container.Visible = true end
+
+	local dialogueLabel = container:FindFirstChild(TEXT_ID, true)
+	local mainBtn = container:FindFirstChild(BTN_MAIN_ID, true)
+	local leaveBtn = container:FindFirstChild(BTN_LEAVE_ID, true)
+
+	-- 3. SETUP BUTTONS
+	if mainBtn then
+		updateMainButton(mainBtn, dialogueLabel)
+	end
+
+	if leaveBtn then
+		local con = leaveBtn.MouseButton1Click:Connect(function()
+			isInteracting = false
+			myGui.Enabled = false
+			camera.CameraType = Enum.CameraType.Custom
+			controls:Enable()
+		end)
+		table.insert(buttonConnections, con)
+	end
+end
+
+-- ============================================================================
+-- ⚡ INITIALIZE
+-- ============================================================================
+local function setup()
+	local folder = Workspace:WaitForChild(NPC_FOLDER)
+	local npc = folder:WaitForChild(TARGET_NPC, 10)
+	if npc then
+		local prompt = npc:FindFirstChild(PROMPT_NAME, true)
+		if prompt then
+			prompt.Triggered:Connect(function() startInteraction(npc) end)
+		end
+	end
+end
+
+setup()
