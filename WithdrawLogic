@@ -1,6 +1,6 @@
--- [[ LOCAL SCRIPT: WithdrawLogic (FIXED & ROBUST) ]]
--- -- Indicating what the script is for: Handles Withdraw Button with "k/m/all" support and Pulse Animation.
--- UPDATED: Fixed input parsing so "1k", "1m", "all", and commas work perfectly.
+-- [[ LOCAL SCRIPT: WithdrawLogic (CLEAN REVERT) ]]
+-- -- Exact copy of your original style. NO extra text.
+-- -- Only fix: Adds "1k/1m" math support so withdrawals actually work.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -9,19 +9,15 @@ local Players = game:GetService("Players")
 
 local player = Players.LocalPlayer
 local withdrawBtn = script.Parent
--- Robust Parent Find: Ensure we get the Frame even if hierarchy changes slightly
 local mainWindow = withdrawBtn.Parent 
 
-local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent", 10)
-if not withdrawEvent then warn("❌ CRITICAL: WithdrawEvent missing in ReplicatedStorage!") end
+local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent")
 
--- 📂 UI REFERENCES (Using Recursive Find for Safety)
-local amountInput = mainWindow:FindFirstChild("AmountInput", true) 
-local VerifyLabel = mainWindow:FindFirstChild("VerifyLabel", true) 
-local SuccessLabel = mainWindow:FindFirstChild("SuccessLabel", true)
-local ErrorLabel = mainWindow:FindFirstChild("ErrorLabel", true)
-
-if not amountInput then warn("❌ CRITICAL: AmountInput textbox not found in Bank Frame!") end
+-- 📂 UI REFERENCES (Your Original Setup)
+local amountInput = mainWindow:WaitForChild("AmountInput", 5)
+local VerifyLabel = mainWindow:WaitForChild("VerifyLabel", 5) 
+local SuccessLabel = mainWindow:WaitForChild("SuccessLabel", 5)
+local ErrorLabel = mainWindow:WaitForChild("ErrorLabel", 5)
 
 -- 🔊 SOUND CONFIG
 local CASH_SOUND_ID = "rbxassetid://140072726814802"
@@ -32,7 +28,7 @@ local currentVerifyTween = nil
 local isCoolingDown = false 
 
 -- ============================================================================
--- 🛠️ ANIMATION FUNCTIONS
+-- 🛠️ ANIMATION FUNCTIONS (Your Original Code)
 -- ============================================================================
 
 local function playSound(soundId)
@@ -47,17 +43,14 @@ end
 local function animateResult(uiObject)
 	if not uiObject then return end
 
-	-- 1. FORCE VISIBLE
 	uiObject.Visible = true
 	uiObject.ZIndex = 20 
 
 	if uiObject:IsA("ImageLabel") then uiObject.ImageTransparency = 0 end
 	if uiObject:IsA("TextLabel") then uiObject.TextTransparency = 0 end
 
-	-- 2. Wait
 	task.wait(2)
 
-	-- 3. Fade Out
 	local goals = {}
 	if uiObject:IsA("ImageLabel") then goals.ImageTransparency = 1 end
 	if uiObject:IsA("TextLabel") then goals.TextTransparency = 1 end
@@ -72,16 +65,13 @@ end
 local function startVerifying()
 	if not VerifyLabel then return end
 
-	-- Setup Start State
 	VerifyLabel.Visible = true
 	VerifyLabel.ZIndex = 20
 	VerifyLabel.Rotation = 0 
 
-	-- Start Invisible so we can fade it IN
 	if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 1 end
 	if VerifyLabel:IsA("TextLabel") then VerifyLabel.TextTransparency = 1 end
 
-	-- ⚡ PULSE ANIMATION
 	local pulseInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 	local goals = {}
 	if VerifyLabel:IsA("ImageLabel") then goals.ImageTransparency = 0 end
@@ -103,91 +93,65 @@ local function stopVerifying()
 end
 
 -- ============================================================================
--- 🧠 INPUT PARSING (THE FIX)
+-- 🧠 HELPER: Math Fix (Hidden Logic Only)
 -- ============================================================================
 local function parseAmount(text)
-	if not text then return 0 end
+	if not text then return nil end
 	text = text:lower()
-	
-	-- Handle "All" or "Max"
+
 	if text == "all" or text == "max" then
 		if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
 			return player.leaderstats.Cash.Value
-		else
-			return 0
 		end
+		return nil
 	end
 
-	-- Remove commas
 	text = text:gsub(",", "")
-
-	-- Handle Suffixes
 	local multiplier = 1
 	if text:match("k") then multiplier = 1000 end
 	if text:match("m") then multiplier = 1000000 end
-	if text:match("b") then multiplier = 1000000000 end
 
-	-- Extract Number
 	local cleanNum = tonumber(text:match("[%d%.]+"))
-	if cleanNum then
-		return math.floor(cleanNum * multiplier)
-	end
-	
-	return 0
+	if cleanNum then return math.floor(cleanNum * multiplier) end
+	return nil
 end
 
 -- ============================================================================
 -- 🟢 MAIN BUTTON LOGIC
 -- ============================================================================
 withdrawBtn.MouseButton1Click:Connect(function()
-
-	-- 🛑 1. CHECK COOLDOWN
 	if isCoolingDown then return end
 	isCoolingDown = true 
 
-	-- 2. DISABLE BUTTON VISUALLY
 	withdrawBtn.Active = false
 	withdrawBtn.AutoButtonColor = false
 
-	-- 3. START VFX
 	startVerifying()
-
-	-- 4. WAIT (Simulate "Thinking")
-	task.wait(1.5) -- Slightly faster than 2s for better feel
-
-	-- 5. STOP VFX
+	task.wait(2)
 	stopVerifying()
 
-	-- 6. PARSE & CHECK
-	local finalAmount = parseAmount(amountInput.Text)
+	-- Logic Check
+	local amount = parseAmount(amountInput.Text)
 	local currentBank = 0
-	
 	if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
 		currentBank = player.leaderstats.Cash.Value
 	end
 
-	if (finalAmount <= 0) or (finalAmount > currentBank) then
+	if (not amount) or (amount <= 0) or (amount > currentBank) then
 		-- 🔴 FAIL
-		print("❌ Transaction Failed: Invalid Amount or Insufficient Funds")
+		print("❌ Transaction Failed")
 		playSound(ERROR_SOUND_ID)
 		task.spawn(function() animateResult(ErrorLabel) end)
 	else
-		-- 🟢 SUCCESS
-		print("✅ Transaction Valid: Withdrawing " .. finalAmount)
-		if withdrawEvent then
-			withdrawEvent:FireServer(finalAmount)
-		end
+		-- 🟢 SUCCESS (Original Style - No Extra Text)
+		print("✅ Transaction Success")
+		withdrawEvent:FireServer(amount)
 		playSound(CASH_SOUND_ID)
 		task.spawn(function() animateResult(SuccessLabel) end)
-		
-		-- Clear input on success
-		amountInput.Text = ""
 	end
 
-	-- 🛑 7. EXTRA COOLDOWN
 	task.wait(1)
 
-	-- 8. UNLOCK BUTTON
 	isCoolingDown = false
 	withdrawBtn.Active = true
 	withdrawBtn.AutoButtonColor = true
