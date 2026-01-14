@@ -1,0 +1,160 @@
+-- ( LOCAL SCRIPT: Inside 'WithdrawButton' )
+-- VERSION: Pulse Animation (Fades In/Out) instead of Spinning
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local withdrawBtn = script.Parent
+local mainWindow = withdrawBtn.Parent 
+
+local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent")
+
+-- 📂 UI REFERENCES
+local amountInput = mainWindow:WaitForChild("AmountInput", 5)
+local VerifyLabel = mainWindow:WaitForChild("VerifyLabel", 5) 
+local SuccessLabel = mainWindow:WaitForChild("SuccessLabel", 5)
+local ErrorLabel = mainWindow:WaitForChild("ErrorLabel", 5)
+
+-- 🔊 SOUND CONFIG
+local CASH_SOUND_ID = "rbxassetid://140072726814802"
+local ERROR_SOUND_ID = "rbxassetid://3779045779"
+
+-- ⚙️ STATE VARIABLES
+local currentVerifyTween = nil -- Renamed from spinTween
+local isCoolingDown = false 
+
+-- ============================================================================
+-- 🛠️ ANIMATION FUNCTIONS
+-- ============================================================================
+
+local function playSound(soundId)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = 1
+	sound.Parent = SoundService 
+	sound:Play()
+	game.Debris:AddItem(sound, 3)
+end
+
+local function animateResult(uiObject)
+	if not uiObject then return end
+
+	-- 1. FORCE VISIBLE
+	uiObject.Visible = true
+	uiObject.ZIndex = 20 
+
+	if uiObject:IsA("ImageLabel") then uiObject.ImageTransparency = 0 end
+	if uiObject:IsA("TextLabel") then uiObject.TextTransparency = 0 end
+
+	-- 2. Wait
+	task.wait(2)
+
+	-- 3. Fade Out
+	local goals = {}
+	if uiObject:IsA("ImageLabel") then goals.ImageTransparency = 1 end
+	if uiObject:IsA("TextLabel") then goals.TextTransparency = 1 end
+
+	local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
+	tweenOut:Play()
+	tweenOut.Completed:Wait()
+
+	uiObject.Visible = false
+end
+
+local function startVerifying()
+	if not VerifyLabel then return end
+
+	-- Setup Start State
+	VerifyLabel.Visible = true
+	VerifyLabel.ZIndex = 20
+	VerifyLabel.Rotation = 0 -- Reset rotation (in case it was spinning before)
+
+	-- Start Invisible so we can fade it IN
+	if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 1 end
+	if VerifyLabel:IsA("TextLabel") then VerifyLabel.TextTransparency = 1 end
+
+	-- ⚡ PULSE ANIMATION (Fade In -> Fade Out -> Repeat)
+	local pulseInfo = TweenInfo.new(
+		0.5, -- Speed of one fade
+		Enum.EasingStyle.Sine, 
+		Enum.EasingDirection.InOut, 
+		-1, -- Repeat Forever
+		true -- AutoReverse (Goes 0->1->0...)
+	)
+
+	local goals = {}
+	if VerifyLabel:IsA("ImageLabel") then goals.ImageTransparency = 0 end
+	if VerifyLabel:IsA("TextLabel") then goals.TextTransparency = 0 end
+
+	currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
+	currentVerifyTween:Play()
+end
+
+local function stopVerifying()
+	if currentVerifyTween then
+		currentVerifyTween:Cancel()
+		currentVerifyTween = nil
+	end
+	if VerifyLabel then
+		VerifyLabel.Visible = false
+		-- Reset transparency just in case
+		if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 0 end
+	end
+end
+
+-- ============================================================================
+-- 🟢 MAIN BUTTON LOGIC
+-- ============================================================================
+withdrawBtn.MouseButton1Click:Connect(function()
+
+	-- 🛑 1. CHECK COOLDOWN
+	if isCoolingDown then return end
+	isCoolingDown = true 
+
+	-- 2. DISABLE BUTTON VISUALLY
+	withdrawBtn.Active = false
+	withdrawBtn.AutoButtonColor = false
+
+	-- 3. START VFX (The Pulse)
+	startVerifying()
+
+	-- 4. WAIT 2 SECONDS (Simulate "Thinking")
+	task.wait(2)
+
+	-- 5. STOP VFX
+	stopVerifying()
+
+	-- 6. CHECK THE MATH
+	local rawText = amountInput.Text
+	local amount = tonumber(rawText) 
+	local currentBank = player.leaderstats.Cash.Value
+
+	if (not amount) or (amount <= 0) or (amount > currentBank) then
+		-- 🔴 FAIL
+		print("❌ Transaction Failed")
+		playSound(ERROR_SOUND_ID)
+		task.spawn(function() animateResult(ErrorLabel) end)
+	else
+		-- 🟢 SUCCESS
+		print("✅ Transaction Success")
+		withdrawEvent:FireServer(amount)
+		playSound(CASH_SOUND_ID)
+		task.spawn(function() animateResult(SuccessLabel) end)
+	end
+
+	-- 🛑 7. EXTRA COOLDOWN
+	task.wait(1)
+
+	-- 8. UNLOCK BUTTON
+	isCoolingDown = false
+	withdrawBtn.Active = true
+	withdrawBtn.AutoButtonColor = true
+end)
+
+-- Initialize
+if VerifyLabel then VerifyLabel.Visible = false end
+if SuccessLabel then SuccessLabel.Visible = false end
+if ErrorLabel then ErrorLabel.Visible = false end
