@@ -1,11 +1,13 @@
 -- [[ LOCAL SCRIPT: Bank UI - SFX Only (Final Verified) ]]
--- -- Indicating what the script is for: Handles Bank UI with SFX, Movement Lock, but NO Background Music.
+-- -- Indicating what the script is for: Handles Bank UI with SFX, Movement Lock, and ATM Integration.
+
 print("---------------------------------------------------------")
 print("🛠️ STARTING BANK UI SCRIPT (SFX ONLY)...")
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage") -- Added for ATM Event
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
@@ -178,7 +180,39 @@ local function setFocusMode(isFocused)
 end
 
 -- ============================================================================
--- 🟢 OPEN LOGIC
+-- 🏧 ATM INTEGRATION (THE FIX)
+-- ============================================================================
+-- Checks for the event created by the NPC script to open this UI remotely.
+local OpenATMEvent = ReplicatedStorage:FindFirstChild("OpenATMEvent")
+if not OpenATMEvent then
+	OpenATMEvent = Instance.new("BindableEvent")
+	OpenATMEvent.Name = "OpenATMEvent"
+	OpenATMEvent.Parent = ReplicatedStorage
+end
+
+OpenATMEvent.Event:Connect(function()
+	playSfx(SOUND_ID, 0.5) 
+
+	-- 1. Setup Visuals
+	local colorHex = getRandomHex()
+	greetingLabel.Text = "<font color='#" .. colorHex .. "'>" .. player.Name .. "</font>"
+	updateDisplay()
+
+	-- 2. Open UI (Locks movement and hides other GUIs)
+	setFocusMode(true)
+
+	-- 3. Direct to Transfer Screen (Better UX for ATMs)
+	if transferFrame then
+		mainWindow.Visible = false -- Hide main menu
+		transferFrame.Visible = true -- Show transfer/withdraw screen immediately
+	end
+
+	TweenService:Create(camera, CAM_TWEEN_INFO, {FieldOfView = OPEN_FOV}):Play()
+	print("✅ ATM Opened Bank UI Successfully")
+end)
+
+-- ============================================================================
+-- 🟢 OPEN LOGIC (Manual Button)
 -- ============================================================================
 openButton.MouseButton1Click:Connect(function()
 	playSfx(SOUND_ID, 0.5) 
