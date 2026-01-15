@@ -1,6 +1,5 @@
--- [[ LOCAL SCRIPT: WithdrawLogic (CLEAN REVERT) ]]
--- -- Exact copy of your original style. NO extra text.
--- -- Only fix: Adds "1k/1m" math support so withdrawals actually work.
+-- ( LOCAL SCRIPT: Inside 'WithdrawButton' )
+-- VERSION: Pulse Animation (Fades In/Out) instead of Spinning
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -13,7 +12,7 @@ local mainWindow = withdrawBtn.Parent
 
 local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent")
 
--- 📂 UI REFERENCES (Your Original Setup)
+-- 📂 UI REFERENCES
 local amountInput = mainWindow:WaitForChild("AmountInput", 5)
 local VerifyLabel = mainWindow:WaitForChild("VerifyLabel", 5) 
 local SuccessLabel = mainWindow:WaitForChild("SuccessLabel", 5)
@@ -24,11 +23,11 @@ local CASH_SOUND_ID = "rbxassetid://140072726814802"
 local ERROR_SOUND_ID = "rbxassetid://3779045779"
 
 -- ⚙️ STATE VARIABLES
-local currentVerifyTween = nil 
+local currentVerifyTween = nil -- Renamed from spinTween
 local isCoolingDown = false 
 
 -- ============================================================================
--- 🛠️ ANIMATION FUNCTIONS (Your Original Code)
+-- 🛠️ ANIMATION FUNCTIONS
 -- ============================================================================
 
 local function playSound(soundId)
@@ -43,14 +42,17 @@ end
 local function animateResult(uiObject)
 	if not uiObject then return end
 
+	-- 1. FORCE VISIBLE
 	uiObject.Visible = true
 	uiObject.ZIndex = 20 
 
 	if uiObject:IsA("ImageLabel") then uiObject.ImageTransparency = 0 end
 	if uiObject:IsA("TextLabel") then uiObject.TextTransparency = 0 end
 
+	-- 2. Wait
 	task.wait(2)
 
+	-- 3. Fade Out
 	local goals = {}
 	if uiObject:IsA("ImageLabel") then goals.ImageTransparency = 1 end
 	if uiObject:IsA("TextLabel") then goals.TextTransparency = 1 end
@@ -65,14 +67,24 @@ end
 local function startVerifying()
 	if not VerifyLabel then return end
 
+	-- Setup Start State
 	VerifyLabel.Visible = true
 	VerifyLabel.ZIndex = 20
-	VerifyLabel.Rotation = 0 
+	VerifyLabel.Rotation = 0 -- Reset rotation (in case it was spinning before)
 
+	-- Start Invisible so we can fade it IN
 	if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 1 end
 	if VerifyLabel:IsA("TextLabel") then VerifyLabel.TextTransparency = 1 end
 
-	local pulseInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+	-- ⚡ PULSE ANIMATION (Fade In -> Fade Out -> Repeat)
+	local pulseInfo = TweenInfo.new(
+		0.5, -- Speed of one fade
+		Enum.EasingStyle.Sine, 
+		Enum.EasingDirection.InOut, 
+		-1, -- Repeat Forever
+		true -- AutoReverse (Goes 0->1->0...)
+	)
+
 	local goals = {}
 	if VerifyLabel:IsA("ImageLabel") then goals.ImageTransparency = 0 end
 	if VerifyLabel:IsA("TextLabel") then goals.TextTransparency = 0 end
@@ -88,54 +100,37 @@ local function stopVerifying()
 	end
 	if VerifyLabel then
 		VerifyLabel.Visible = false
+		-- Reset transparency just in case
 		if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 0 end
 	end
-end
-
--- ============================================================================
--- 🧠 HELPER: Math Fix (Hidden Logic Only)
--- ============================================================================
-local function parseAmount(text)
-	if not text then return nil end
-	text = text:lower()
-
-	if text == "all" or text == "max" then
-		if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
-			return player.leaderstats.Cash.Value
-		end
-		return nil
-	end
-
-	text = text:gsub(",", "")
-	local multiplier = 1
-	if text:match("k") then multiplier = 1000 end
-	if text:match("m") then multiplier = 1000000 end
-
-	local cleanNum = tonumber(text:match("[%d%.]+"))
-	if cleanNum then return math.floor(cleanNum * multiplier) end
-	return nil
 end
 
 -- ============================================================================
 -- 🟢 MAIN BUTTON LOGIC
 -- ============================================================================
 withdrawBtn.MouseButton1Click:Connect(function()
+
+	-- 🛑 1. CHECK COOLDOWN
 	if isCoolingDown then return end
 	isCoolingDown = true 
 
+	-- 2. DISABLE BUTTON VISUALLY
 	withdrawBtn.Active = false
 	withdrawBtn.AutoButtonColor = false
 
+	-- 3. START VFX (The Pulse)
 	startVerifying()
+
+	-- 4. WAIT 2 SECONDS (Simulate "Thinking")
 	task.wait(2)
+
+	-- 5. STOP VFX
 	stopVerifying()
 
-	-- Logic Check
-	local amount = parseAmount(amountInput.Text)
-	local currentBank = 0
-	if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
-		currentBank = player.leaderstats.Cash.Value
-	end
+	-- 6. CHECK THE MATH
+	local rawText = amountInput.Text
+	local amount = tonumber(rawText) 
+	local currentBank = player.leaderstats.Cash.Value
 
 	if (not amount) or (amount <= 0) or (amount > currentBank) then
 		-- 🔴 FAIL
@@ -143,15 +138,17 @@ withdrawBtn.MouseButton1Click:Connect(function()
 		playSound(ERROR_SOUND_ID)
 		task.spawn(function() animateResult(ErrorLabel) end)
 	else
-		-- 🟢 SUCCESS (Original Style - No Extra Text)
+		-- 🟢 SUCCESS
 		print("✅ Transaction Success")
 		withdrawEvent:FireServer(amount)
 		playSound(CASH_SOUND_ID)
 		task.spawn(function() animateResult(SuccessLabel) end)
 	end
 
+	-- 🛑 7. EXTRA COOLDOWN
 	task.wait(1)
 
+	-- 8. UNLOCK BUTTON
 	isCoolingDown = false
 	withdrawBtn.Active = true
 	withdrawBtn.AutoButtonColor = true
