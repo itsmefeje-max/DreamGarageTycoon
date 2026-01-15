@@ -1,124 +1,53 @@
--- [[ LOCAL SCRIPT: WithdrawLogic (Final Step: Send to NPC) ]]
--- -- Indicating what the script is for: Handles Tablet input and sends money to the ATM (NPC) for pickup.
+-- ( SERVER SIDE: Withdraw Money from Bank -> Wallet )
+-- FIXED: Matches TycoonDataHandler names ("Cash" = Bank, "Wallet" = Pocket)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
-local Players = game:GetService("Players")
+local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent")
 
-local player = Players.LocalPlayer
-local withdrawBtn = script.Parent
+-- ⏳ COOLDOWN CONFIG (Set to 0.5s to prevent spam, NOT 3 hours)
+local COOLDOWN_TIME = 0.5 
+local cooldowns = {} 
 
--- 🔍 ROBUST FINDER: Finds the Main GUI even if you moved the button
--- This prevents the "attempt to index nil" errors you had before.
-local mainScreenGui = withdrawBtn:FindFirstAncestorWhichIsA("ScreenGui")
-local amountInput = mainScreenGui and mainScreenGui:FindFirstChild("AmountInput", true) 
-local VerifyLabel = mainScreenGui and mainScreenGui:FindFirstChild("VerifyLabel", true)
-local SuccessLabel = mainScreenGui and mainScreenGui:FindFirstChild("SuccessLabel", true)
-local ErrorLabel = mainScreenGui and mainScreenGui:FindFirstChild("ErrorLabel", true)
+withdrawEvent.OnServerEvent:Connect(function(player, amount)
+	-- 1. Validate Amount
+	if not amount or amount <= 0 then return end
 
--- 📡 EVENTS
-local withdrawEvent = ReplicatedStorage:WaitForChild("WithdrawEvent", 10)
+	-- Prevent decimals/glitches
+	amount = math.floor(amount) 
 
--- 🔊 SOUNDS
-local SUCCESS_SOUND = "rbxassetid://140072726814802"
-local ERROR_SOUND = "rbxassetid://3779045779"
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then return end
 
--- ============================================================================
--- 🧠 SMART INPUT PARSER (k, m, all, commas)
--- ============================================================================
-local function parseAmount(text)
-	if not text then return 0 end
-	text = text:lower()
+	-- 2. DEFINE VARIABLES (SYNCED WITH TYCOONDATAHANDLER)
+	-- "Cash" is your BANK (Where tycoon money goes)
+	-- "Wallet" is your POCKET (Where you withdraw to)
+	local bank = leaderstats:FindFirstChild("Cash")   
+	local wallet = leaderstats:FindFirstChild("Wallet") 
 
-	-- Handle "All" or "Max"
-	if text == "all" or text == "max" then
-		if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
-			return player.leaderstats.Cash.Value
+	if bank and wallet then
+
+		-- 3. CHECK COOLDOWN
+		local lastTime = cooldowns[player.UserId]
+		if lastTime and (os.time() - lastTime) < COOLDOWN_TIME then
+			warn("⏳ Transaction too fast for " .. player.Name)
+			return 
 		end
-		return 0
-	end
 
-	-- Remove commas
-	text = text:gsub(",", "")
+		-- 4. CHECK BALANCE (Do they have enough in the BANK?)
+		if bank.Value >= amount then
 
-	-- Handle Suffixes (k, m, b)
-	local multiplier = 1
-	if text:match("k") then multiplier = 1000 end
-	if text:match("m") then multiplier = 1000000 end
-	if text:match("b") then multiplier = 1000000000 end
+			-- 5. DO THE TRANSFER
+			bank.Value = bank.Value - amount   -- Take from Bank (Cash)
+			wallet.Value = wallet.Value + amount -- Give to Wallet
 
-	-- Extract Number
-	local cleanNum = tonumber(text:match("[%d%.]+"))
-	if cleanNum then
-		return math.floor(cleanNum * multiplier)
-	end
+			-- Update Cooldown
+			cooldowns[player.UserId] = os.time()
 
-	return 0
-end
-
--- ============================================================================
--- 🎬 ANIMATIONS
--- ============================================================================
-local function playSound(id)
-	local s = Instance.new("Sound", SoundService); s.SoundId = id; s.Volume = 0.5; s:Play(); game.Debris:AddItem(s, 2)
-end
-
-local function showFeedback(label)
-	if not label then return end
-	label.Visible = true
-	label.TextTransparency = 0
-	task.wait(2)
-	for i = 0, 1, 0.1 do
-		label.TextTransparency = i
-		task.wait(0.05)
-	end
-	label.Visible = false
-end
-
--- ============================================================================
--- 🟢 MAIN CLICK LOGIC
--- ============================================================================
-withdrawBtn.MouseButton1Click:Connect(function()
-	-- 1. Validate Input Box
-	if not amountInput then 
-		warn("❌ Error: Cannot find 'AmountInput' text box.") 
-		return 
-	end
-
-	-- 2. Parse the Number
-	local amount = parseAmount(amountInput.Text)
-	local bank = 0
-	if player.leaderstats and player.leaderstats:FindFirstChild("Cash") then
-		bank = player.leaderstats.Cash.Value
-	end
-
-	-- 3. Check Funds
-	if amount > 0 and amount <= bank then
-		-- ✅ VALID: Send to ATM
-		if withdrawEvent then
-			withdrawEvent:FireServer(amount) -- This goes to TransactionHandler
-
-			print("📤 Sent $" .. amount .. " to NPC for pickup.")
-			playSound(SUCCESS_SOUND)
-
-			-- Visual Feedback
-			amountInput.Text = "SENT TO ATM!"
-			if SuccessLabel then task.spawn(function() showFeedback(SuccessLabel) end) end
-
-			task.wait(1)
-			amountInput.Text = ""
+			print("✅ Success! Withdrew $" .. amount .. " from Bank to Wallet.")
 		else
-			warn("❌ Critical: WithdrawEvent not found!")
+			warn("❌ Insufficient Funds. Bank: " .. bank.Value .. " | Needed: " .. amount)
 		end
 	else
-		-- ❌ INVALID: Not enough money or bad number
-		print("❌ Invalid Amount or Insufficient Funds")
-		playSound(ERROR_SOUND)
-
-		if ErrorLabel then task.spawn(function() showFeedback(ErrorLabel) end) end
-		amountInput.Text = "Error"
-		task.wait(1)
-		amountInput.Text = ""
+		warn("❌ CRITICAL: Missing 'Cash' or 'Wallet' in leaderstats for " .. player.Name)
 	end
 end)
