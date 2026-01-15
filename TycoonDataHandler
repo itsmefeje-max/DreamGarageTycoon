@@ -1,5 +1,5 @@
--- [[ SERVER SIDE: TycoonDataHandler (Step 3: Safety Refund) ]]
--- -- Indicating what the script is for: Saves player data and REFUNDS uncollected ATM money on leave.
+-- [[ SERVER SIDE: TycoonDataHandler (Sign Restoration Edition) ]]
+-- -- Indicating what the script is for: Saves pending money and PUTS IT BACK ON THE SIGN when you rejoin.
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -15,10 +15,7 @@ local CarTools = ServerStorage:WaitForChild("CarTools")
 local TycoonFolder = Workspace:WaitForChild("Tycoons") 
 local STARTER_CAR_NAME = "Delta Item" 
 
--- ============================================================================
--- 🛠️ HELPER FUNCTIONS
--- ============================================================================
-
+-- 🛠️ HELPER: Give items safely
 local function giveTool(player, toolName)
 	if not player or not player.Parent then return end
 	if player.Backpack:FindFirstChild(toolName) or player.StarterGear:FindFirstChild(toolName) then return end
@@ -30,6 +27,7 @@ local function giveTool(player, toolName)
 	end
 end
 
+-- 🛠️ HELPER: Find Player Plot
 local function findPlayerPlot(player)
 	-- 1. Check Attribute
 	local plotName = player:GetAttribute("OccupiedPlot")
@@ -46,7 +44,7 @@ local function findPlayerPlot(player)
 	return nil
 end
 
--- Pushes restored money back to the Tycoon Sign
+-- 🛠️ HELPER: Push Money to Plot (The Magic Function)
 local function pushMoneyToPlot(player)
 	local amount = player:GetAttribute("RestoredPending")
 	if not amount or amount <= 0 then return end
@@ -55,23 +53,21 @@ local function pushMoneyToPlot(player)
 	if plot then
 		local pendingVal = plot:FindFirstChild("PendingEarnings")
 		if pendingVal then
+			-- Add the saved money back to the sign!
 			pendingVal.Value = pendingVal.Value + amount
-			player:SetAttribute("RestoredPending", 0) -- Clear memory so we don't add it twice
+
+			-- Clear the memory attribute so we don't duplicate it
+			player:SetAttribute("RestoredPending", 0)
 			print("💰 Restored $" .. amount .. " to " .. player.Name .. "'s Tycoon Sign.")
 		end
 	end
 end
 
--- ============================================================================
 -- 📥 JOIN LOGIC
--- ============================================================================
 Players.PlayerAdded:Connect(function(player)
 	local leaderstats = Instance.new("Folder"); leaderstats.Name = "leaderstats"; leaderstats.Parent = player
 	local bank = Instance.new("IntValue"); bank.Name = "Cash"; bank.Parent = leaderstats
 	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Value = 0; wallet.Parent = leaderstats
-
-	-- Initialize Attributes
-	player:SetAttribute("PendingATM", 0)
 
 	local playerKey = "User_" .. player.UserId
 	local savedData = nil
@@ -92,9 +88,13 @@ Players.PlayerAdded:Connect(function(player)
 				for _, tName in pairs(savedData.Inventory) do giveTool(player, tName) end
 			end
 
-			-- Handle Tycoon Earnings Restoration
+			-- 🛑 PENDING MONEY LOGIC (Sign Restoration)
 			if savedData.PendingEarnings and savedData.PendingEarnings > 0 then
+				-- Store it in memory first
 				player:SetAttribute("RestoredPending", savedData.PendingEarnings)
+				print("⏳ Found pending cash. Waiting for plot...")
+
+				-- Check if plot is already assigned
 				pushMoneyToPlot(player)
 			end
 		else
@@ -108,31 +108,18 @@ Players.PlayerAdded:Connect(function(player)
 		player:Kick("Data failed to load. Please rejoin.")
 	end
 
-	-- Listen for plot assignment
+	-- 👂 Listen for when they get a plot (if they haven't yet)
 	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(function()
 		pushMoneyToPlot(player)
 	end)
 end)
 
--- ============================================================================
--- 💾 LEAVE LOGIC (With Safety Refund)
--- ============================================================================
+-- 💾 LEAVE LOGIC
 local function savePlayerData(player)
 	if not player:GetAttribute("DataLoaded") then return end
 
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return end
-
-	-- 🛡️ [NEW SAFETY FIX] 🛡️
-	-- Check if they have money stuck in "PendingATM"
-	local pendingATM = player:GetAttribute("PendingATM") or 0
-	local totalBank = leaderstats.Cash.Value
-
-	if pendingATM > 0 then
-		print("🔄 REFUNDING: " .. player.Name .. " left with $" .. pendingATM .. " uncollected. Returning to Bank.")
-		totalBank = totalBank + pendingATM -- Safely add it back to the saved value
-	end
-	-- 🛡️ [END SAFETY FIX] 🛡️
 
 	local inventoryTable = {}
 	if player:FindFirstChild("StarterGear") then
@@ -141,14 +128,17 @@ local function savePlayerData(player)
 		end
 	end
 
-	-- Capture Pending Earnings (Tycoon)
+	-- 💰 CAPTURE PENDING EARNINGS
 	local currentPending = 0
+
+	-- 1. Check the Plot (Sign)
 	local plot = findPlayerPlot(player)
 	if plot then
 		local pendingVal = plot:FindFirstChild("PendingEarnings")
 		if pendingVal then currentPending = pendingVal.Value end
 	end
 
+	-- 2. Check Memory (In case they left before the plot loaded)
 	local memoryPending = player:GetAttribute("RestoredPending") or 0
 	if memoryPending > 0 then
 		currentPending = currentPending + memoryPending
@@ -158,10 +148,10 @@ local function savePlayerData(player)
 	local success, err = pcall(function()
 		PlayerDataStore:UpdateAsync(playerKey, function(oldData)
 			return {
-				Bank = totalBank, -- Uses the Refunded Amount
+				Bank = leaderstats.Cash.Value,
 				Wallet = leaderstats.Wallet.Value,
 				Inventory = inventoryTable,
-				PendingEarnings = currentPending 
+				PendingEarnings = currentPending -- Saves whatever is on the sign OR in memory
 			}
 		end)
 	end)
