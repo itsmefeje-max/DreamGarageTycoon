@@ -1,25 +1,21 @@
--- [[ SERVER SIDE: TycoonDataHandler (Sign Restoration Edition) ]]
--- -- Indicating what the script is for: Saves pending money and PUTS IT BACK ON THE SIGN when you rejoin.
-
+-- [[ SERVER SIDE: TycoonDataHandler (V5: With ATM Storage) ]]
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
 local Workspace = game:GetService("Workspace")
 
--- 🔒 DATABASE CONFIG
-local DATA_KEY = "TycoonData_Economy_V3" 
+-- 🔒 DATABASE CONFIG (New Key to reset data structure safely)
+local DATA_KEY = "TycoonData_Economy_V5_ATM" 
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
--- 📂 STORAGE
 local CarTools = ServerStorage:WaitForChild("CarTools") 
 local TycoonFolder = Workspace:WaitForChild("Tycoons") 
 local STARTER_CAR_NAME = "Delta Item" 
 
--- 🛠️ HELPER: Give items safely
+-- 🛠️ HELPER FUNCTIONS
 local function giveTool(player, toolName)
 	if not player or not player.Parent then return end
 	if player.Backpack:FindFirstChild(toolName) or player.StarterGear:FindFirstChild(toolName) then return end
-
 	local tool = CarTools:FindFirstChild(toolName)
 	if tool then
 		tool:Clone().Parent = player.Backpack
@@ -27,38 +23,25 @@ local function giveTool(player, toolName)
 	end
 end
 
--- 🛠️ HELPER: Find Player Plot
 local function findPlayerPlot(player)
-	-- 1. Check Attribute
 	local plotName = player:GetAttribute("OccupiedPlot")
-	if plotName and TycoonFolder:FindFirstChild(plotName) then
-		return TycoonFolder[plotName]
-	end
-	-- 2. Fallback Search
+	if plotName and TycoonFolder:FindFirstChild(plotName) then return TycoonFolder[plotName] end
 	for _, plot in pairs(TycoonFolder:GetChildren()) do
 		local ownerVal = plot:FindFirstChild("Owner") 
-		if ownerVal and (ownerVal.Value == player or ownerVal.Value == player.Name) then
-			return plot
-		end
+		if ownerVal and (ownerVal.Value == player or ownerVal.Value == player.Name) then return plot end
 	end
 	return nil
 end
 
--- 🛠️ HELPER: Push Money to Plot (The Magic Function)
 local function pushMoneyToPlot(player)
 	local amount = player:GetAttribute("RestoredPending")
 	if not amount or amount <= 0 then return end
-
 	local plot = findPlayerPlot(player)
 	if plot then
 		local pendingVal = plot:FindFirstChild("PendingEarnings")
 		if pendingVal then
-			-- Add the saved money back to the sign!
 			pendingVal.Value = pendingVal.Value + amount
-
-			-- Clear the memory attribute so we don't duplicate it
 			player:SetAttribute("RestoredPending", 0)
-			print("💰 Restored $" .. amount .. " to " .. player.Name .. "'s Tycoon Sign.")
 		end
 	end
 end
@@ -66,8 +49,13 @@ end
 -- 📥 JOIN LOGIC
 Players.PlayerAdded:Connect(function(player)
 	local leaderstats = Instance.new("Folder"); leaderstats.Name = "leaderstats"; leaderstats.Parent = player
+
+	-- 1. BANK (Digital)
 	local bank = Instance.new("IntValue"); bank.Name = "Cash"; bank.Parent = leaderstats
-	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Value = 0; wallet.Parent = leaderstats
+	-- 2. WALLET (Physical)
+	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Parent = leaderstats
+	-- 3. ATM HOLDING (New Separate Value)
+	local atmBal = Instance.new("IntValue"); atmBal.Name = "ATMBalance"; atmBal.Value = 0; atmBal.Parent = leaderstats
 
 	local playerKey = "User_" .. player.UserId
 	local savedData = nil
@@ -78,29 +66,25 @@ Players.PlayerAdded:Connect(function(player)
 
 	if success then
 		player:SetAttribute("DataLoaded", true)
-
 		if savedData then
 			print("✅ Loaded Data for " .. player.Name)
 			bank.Value = savedData.Bank or 0
 			wallet.Value = savedData.Wallet or 0
+			atmBal.Value = savedData.ATMBalance or 0 -- Load the NPC's holding
 
 			if savedData.Inventory then
 				for _, tName in pairs(savedData.Inventory) do giveTool(player, tName) end
 			end
 
-			-- 🛑 PENDING MONEY LOGIC (Sign Restoration)
 			if savedData.PendingEarnings and savedData.PendingEarnings > 0 then
-				-- Store it in memory first
 				player:SetAttribute("RestoredPending", savedData.PendingEarnings)
-				print("⏳ Found pending cash. Waiting for plot...")
-
-				-- Check if plot is already assigned
 				pushMoneyToPlot(player)
 			end
 		else
 			print("🆕 New Player: " .. player.Name)
 			bank.Value = 0
 			wallet.Value = 0
+			atmBal.Value = 0
 			giveTool(player, STARTER_CAR_NAME) 
 		end
 	else
@@ -108,16 +92,12 @@ Players.PlayerAdded:Connect(function(player)
 		player:Kick("Data failed to load. Please rejoin.")
 	end
 
-	-- 👂 Listen for when they get a plot (if they haven't yet)
-	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(function()
-		pushMoneyToPlot(player)
-	end)
+	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(function() pushMoneyToPlot(player) end)
 end)
 
 -- 💾 LEAVE LOGIC
 local function savePlayerData(player)
 	if not player:GetAttribute("DataLoaded") then return end
-
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return end
 
@@ -128,21 +108,14 @@ local function savePlayerData(player)
 		end
 	end
 
-	-- 💰 CAPTURE PENDING EARNINGS
 	local currentPending = 0
-
-	-- 1. Check the Plot (Sign)
 	local plot = findPlayerPlot(player)
 	if plot then
 		local pendingVal = plot:FindFirstChild("PendingEarnings")
 		if pendingVal then currentPending = pendingVal.Value end
 	end
-
-	-- 2. Check Memory (In case they left before the plot loaded)
 	local memoryPending = player:GetAttribute("RestoredPending") or 0
-	if memoryPending > 0 then
-		currentPending = currentPending + memoryPending
-	end
+	if memoryPending > 0 then currentPending = currentPending + memoryPending end
 
 	local playerKey = "User_" .. player.UserId
 	local success, err = pcall(function()
@@ -150,13 +123,14 @@ local function savePlayerData(player)
 			return {
 				Bank = leaderstats.Cash.Value,
 				Wallet = leaderstats.Wallet.Value,
+				ATMBalance = leaderstats.ATMBalance.Value, -- Save the NPC's holding
 				Inventory = inventoryTable,
-				PendingEarnings = currentPending -- Saves whatever is on the sign OR in memory
+				PendingEarnings = currentPending 
 			}
 		end)
 	end)
 
-	if success then print("💾 Saved Data safely for " .. player.Name)
+	if success then print("💾 Saved Data for " .. player.Name)
 	else warn("⚠️ Save Failed: " .. tostring(err)) end
 end
 
