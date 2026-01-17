@@ -1,28 +1,47 @@
--- ( LOCAL SCRIPT: Universal Sprint - TOGGLE FIX )
--- Features: Toggle Button (Mobile) + Toggle Shift (PC) + DISABLES WHEN HOLDING ITEMS
+-- [[ LOCAL SCRIPT: Universal Sprint (Merged) ]]
+-- -- Indicating what the script is for: Handles Mobile Button + PC Shift + Custom Running Animation.
+-- UPDATED: Merged ContextActionService logic with GUI logic to prevent conflicts.
 
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local button = script.Parent -- The ImageButton
 
 -- === CONFIGURATION ===
-local WALK_SPEED = 16
-local SPRINT_SPEED = 26
+local WALK_SPEED = 16       -- Normal Speed
+local SPRINT_SPEED = 30     -- Sprint Speed (Adjusted to match your pasted script)
+local ANIMATION_ID = "rbxassetid://103489308479400" -- Your Animation ID
 
 -- === STATE ===
 local isSprinting = false
+local runTrack = nil -- Stores the loaded animation track
 
--- 1. VISIBILITY SETUP
--- Only show mobile button if touch is enabled
+-- 1. VISIBILITY SETUP (Mobile Check)
 if UserInputService.TouchEnabled then
 	button.Visible = true
 else
 	button.Visible = false 
 end
 
--- 🛠️ HELPER: Change Speed
+-- 🛠️ ANIMATION HANDLER
+local function updateAnimation(humanoid)
+	if not runTrack then return end
+
+	-- Check if moving AND sprinting
+	if isSprinting and humanoid.MoveDirection.Magnitude > 0 then
+		if not runTrack.IsPlaying then
+			runTrack:Play()
+		end
+	else
+		if runTrack.IsPlaying then
+			runTrack:Stop()
+		end
+	end
+end
+
+-- 🛠️ SPEED HANDLER
 local function updateSpeed()
 	local character = player.Character
 	if character then
@@ -30,53 +49,67 @@ local function updateSpeed()
 		if humanoid then
 			-- 🛑 SAFETY CHECK: If holding a tool, NEVER sprint
 			if character:FindFirstChildWhichIsA("Tool") then
-				humanoid.WalkSpeed = WALK_SPEED -- Force walk speed
+				isSprinting = false
+				humanoid.WalkSpeed = WALK_SPEED 
+				
+				-- Stop animation since we forced walk
+				if runTrack and runTrack.IsPlaying then runTrack:Stop() end
+				
+				-- Update Visuals
+				button.ImageTransparency = 0
+				if UserInputService.TouchEnabled then button.Visible = false end
 				return
 			end
 
-			-- Normal Logic
+			-- Apply Speed
 			humanoid.WalkSpeed = isSprinting and SPRINT_SPEED or WALK_SPEED
+			
+			-- Update Visuals
+			button.ImageTransparency = isSprinting and 0.5 or 0
+			
+			-- Update Animation
+			updateAnimation(humanoid)
 		end
-	end
-
-	-- Update Mobile Button Visuals
-	if isSprinting then
-		button.ImageTransparency = 0.5 -- Dim (Active)
-	else
-		button.ImageTransparency = 0 -- Bright (Inactive)
 	end
 end
 
--- 🛡️ MONITOR TOOLS (The Fix)
+-- 🛡️ CHARACTER SETUP
 local function setupCharacter(character)
 	local humanoid = character:WaitForChild("Humanoid", 10)
 	if not humanoid then return end
+	
+	local animator = humanoid:WaitForChild("Animator", 10)
+	if not animator then return end
 
-	-- Function to check if we are holding something
+	-- 1. LOAD ANIMATION
+	local newAnim = Instance.new("Animation")
+	newAnim.AnimationId = ANIMATION_ID
+	runTrack = animator:LoadAnimation(newAnim)
+	runTrack.Priority = Enum.AnimationPriority.Action
+	runTrack.Looped = true
+
+	-- 2. TOOL MONITORING (The Fix)
 	local function checkTools()
 		if character:FindFirstChildWhichIsA("Tool") then
-			-- ✋ PLAYER IS HOLDING A CAR/ITEM
+			-- ✋ PLAYER IS HOLDING A ITEM -> DISABLE SPRINT
 			isSprinting = false
 			updateSpeed()
-			
-			-- Hide button so they can't try to sprint
-			button.Visible = false
 		else
-			-- ✅ HANDS ARE EMPTY
-			updateSpeed() -- Just to be safe
-			
-			-- Show button again if on Mobile
+			-- ✅ HANDS ARE EMPTY -> SHOW BUTTON (Mobile)
 			if UserInputService.TouchEnabled then
 				button.Visible = true
 			end
 		end
 	end
 
-	-- Listen for Equipping (ChildAdded) and Unequipping (ChildRemoved)
 	character.ChildAdded:Connect(checkTools)
 	character.ChildRemoved:Connect(checkTools)
 	
-	-- Run once at start in case they spawn with a tool
+	-- 3. MOVEMENT MONITORING (Stops animation if player stands still while holding shift)
+	humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+		updateAnimation(humanoid)
+	end)
+
 	checkTools()
 end
 
@@ -108,10 +141,11 @@ button.MouseButton1Click:Connect(function()
 	updateSpeed()
 end)
 
--- 🛡️ SAFETY: Reset on Respawn
+-- 🛡️ RESET ON RESPAWN
 player.CharacterAdded:Connect(function(char)
 	isSprinting = false
-	-- Reset visibility based on device
+	runTrack = nil -- Reset track
+	
 	if UserInputService.TouchEnabled then
 		button.Visible = true
 	else
