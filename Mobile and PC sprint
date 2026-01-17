@@ -1,25 +1,22 @@
--- [[ LOCAL SCRIPT: Universal Movement (Sprint + Walk) ]]
--- -- Indicating what the script is for: Handles Mobile Button, PC Shift, and Custom Walk/Run Animations.
--- UPDATED: Now supports YOUR custom Walk Animation ID + Sprint Animation.
+-- [[ LOCAL SCRIPT: Universal Sprint (Merged) ]]
+-- -- Indicating what the script is for: Handles Mobile Button + PC Shift + Custom Running Animation.
+-- UPDATED: Merged ContextActionService logic with GUI logic to prevent conflicts.
 
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local button = script.Parent -- The ImageButton
 
--- === ⚙️ CONFIGURATION ===
-local WALK_SPEED = 30      -- Normal Speed
-local SPRINT_SPEED = 50    -- Sprint Speed
-
--- 🎥 ANIMATION IDS
-local WALK_ANIM_ID = "rbxassetid://89191212294315"  -- ✅ YOUR NEW WALK ID
-local SPRINT_ANIM_ID = "rbxassetid://103489308479400" -- Previous Sprint ID (Change if needed)
+-- === CONFIGURATION ===
+local WALK_SPEED = 30       -- Normal Speed
+local SPRINT_SPEED = 50     -- Sprint Speed (Adjusted to match your pasted script)
+local ANIMATION_ID = "rbxassetid://103489308479400" -- Your Animation ID
 
 -- === STATE ===
 local isSprinting = false
-local walkTrack = nil
-local runTrack = nil
+local runTrack = nil -- Stores the loaded animation track
 
 -- 1. VISIBILITY SETUP (Mobile Check)
 if UserInputService.TouchEnabled then
@@ -28,24 +25,19 @@ else
 	button.Visible = false 
 end
 
--- 🛠️ ANIMATION HANDLER (The Brain)
+-- 🛠️ ANIMATION HANDLER
 local function updateAnimation(humanoid)
-	-- If not moving, stop everything (Let default Idle play)
-	if humanoid.MoveDirection.Magnitude == 0 then
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
-		if runTrack and runTrack.IsPlaying then runTrack:Stop() end
-		return
-	end
+	if not runTrack then return end
 
-	-- If Moving...
-	if isSprinting then
-		-- PLAY SPRINT, STOP WALK
-		if runTrack and not runTrack.IsPlaying then runTrack:Play() end
-		if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
+	-- Check if moving AND sprinting
+	if isSprinting and humanoid.MoveDirection.Magnitude > 0 then
+		if not runTrack.IsPlaying then
+			runTrack:Play()
+		end
 	else
-		-- PLAY WALK, STOP SPRINT
-		if walkTrack and not walkTrack.IsPlaying then walkTrack:Play() end
-		if runTrack and runTrack.IsPlaying then runTrack:Stop() end
+		if runTrack.IsPlaying then
+			runTrack:Stop()
+		end
 	end
 end
 
@@ -59,12 +51,10 @@ local function updateSpeed()
 			if character:FindFirstChildWhichIsA("Tool") then
 				isSprinting = false
 				humanoid.WalkSpeed = WALK_SPEED 
-				
-				-- Stop sprint animation immediately
+
+				-- Stop animation since we forced walk
 				if runTrack and runTrack.IsPlaying then runTrack:Stop() end
-				-- Let walk animation take over if moving
-				updateAnimation(humanoid)
-				
+
 				-- Update Visuals
 				button.ImageTransparency = 0
 				if UserInputService.TouchEnabled then button.Visible = false end
@@ -73,10 +63,10 @@ local function updateSpeed()
 
 			-- Apply Speed
 			humanoid.WalkSpeed = isSprinting and SPRINT_SPEED or WALK_SPEED
-			
+
 			-- Update Visuals
 			button.ImageTransparency = isSprinting and 0.5 or 0
-			
+
 			-- Update Animation
 			updateAnimation(humanoid)
 		end
@@ -87,25 +77,18 @@ end
 local function setupCharacter(character)
 	local humanoid = character:WaitForChild("Humanoid", 10)
 	if not humanoid then return end
-	
+
 	local animator = humanoid:WaitForChild("Animator", 10)
 	if not animator then return end
 
-	-- 1. LOAD WALK ANIMATION
-	local walkAnim = Instance.new("Animation")
-	walkAnim.AnimationId = WALK_ANIM_ID
-	walkTrack = animator:LoadAnimation(walkAnim)
-	walkTrack.Priority = Enum.AnimationPriority.Movement -- Overrides default walk
-	walkTrack.Looped = true
-
-	-- 2. LOAD SPRINT ANIMATION
-	local runAnim = Instance.new("Animation")
-	runAnim.AnimationId = SPRINT_ANIM_ID
-	runTrack = animator:LoadAnimation(runAnim)
-	runTrack.Priority = Enum.AnimationPriority.Action -- Higher priority than walk
+	-- 1. LOAD ANIMATION
+	local newAnim = Instance.new("Animation")
+	newAnim.AnimationId = ANIMATION_ID
+	runTrack = animator:LoadAnimation(newAnim)
+	runTrack.Priority = Enum.AnimationPriority.Action
 	runTrack.Looped = true
 
-	-- 3. TOOL MONITORING
+	-- 2. TOOL MONITORING (The Fix)
 	local function checkTools()
 		if character:FindFirstChildWhichIsA("Tool") then
 			-- ✋ PLAYER IS HOLDING A ITEM -> DISABLE SPRINT
@@ -121,8 +104,8 @@ local function setupCharacter(character)
 
 	character.ChildAdded:Connect(checkTools)
 	character.ChildRemoved:Connect(checkTools)
-	
-	-- 4. MOVEMENT MONITORING
+
+	-- 3. MOVEMENT MONITORING (Stops animation if player stands still while holding shift)
 	humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
 		updateAnimation(humanoid)
 	end)
@@ -161,15 +144,14 @@ end)
 -- 🛡️ RESET ON RESPAWN
 player.CharacterAdded:Connect(function(char)
 	isSprinting = false
-	walkTrack = nil
-	runTrack = nil
-	
+	runTrack = nil -- Reset track
+
 	if UserInputService.TouchEnabled then
 		button.Visible = true
 	else
 		button.Visible = false
 	end
-	
+
 	setupCharacter(char)
 end)
 
