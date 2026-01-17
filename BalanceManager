@@ -1,54 +1,106 @@
--- [[ LOCAL SCRIPT: BalanceManager ]]
--- Indicating what the script is for: Tracks the "Physical Wallet" (Withdrawn Funds).
+-- [[ LOCAL SCRIPT: BalanceManager (Tablet-Style Floating Feedback) ]]
+-- Indicating what the script is for: Tracks Wallet & Spawns Floating "+Cash" Feedback.
 -- LOCATION: StarterGui > Balance-Indicator > Balance (TextLabel)
 
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 local player = Players.LocalPlayer
 
 -- 1. TARGET THE LABEL
 local label = script.Parent
 
 -- 2. WAIT FOR DATA
--- ⚠️ CRITICAL CHANGE: We track "Wallet", not "Cash".
--- "Cash" is your Bank (Tablet). "Wallet" is what you hold after withdrawing from the NPC.
+-- We track "Wallet" (Physical Cash)
 local leaderstats = player:WaitForChild("leaderstats")
 local walletValue = leaderstats:WaitForChild("Wallet") 
 
+-- STATE VARIABLES
+local currentBalance = walletValue.Value -- Track previous value to calculate difference
+
 -- ============================================================================
--- 📊 FORMATTING HELPER (Example: 1.1B$)
+-- ⚙️ SETTINGS (Matches TabletVisuals Style)
+-- ============================================================================
+local FLOAT_DURATION = 3.0       -- You requested ~3 seconds
+local FLOAT_DISTANCE = 0.08      -- How high it floats (Scale 0-1)
+local TEXT_COLOR = Color3.fromRGB(85, 255, 127) -- The Green color from TabletVisuals
+
+-- ============================================================================
+-- 📊 FORMATTING HELPER
 -- ============================================================================
 local SUFFIXES = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
 
 local function formatMoney(n)
 	n = tonumber(n) or 0
-	
-	-- Case 1: Less than 1,000 (No decimals needed) -> "500$"
-	if n < 1000 then 
-		return tostring(math.floor(n)) .. "$" 
-	end
-
-	-- Case 2: 1,000+ (Suffixes) -> "1.10B$"
+	if n < 1000 then return tostring(math.floor(n)) .. "$" end
 	local i = math.floor(math.log(n, 1000))
 	local v = math.pow(1000, i)
 	local suffix = SUFFIXES[i] or "?"
-	
-	-- We format with 2 decimals to be precise, followed by the Suffix and Dollar Sign
 	return string.format("%.2f%s$", n / v, suffix)
+end
+
+-- ============================================================================
+-- ☁️ FLOATING TEXT LOGIC (Ported from TabletVisuals)
+-- ============================================================================
+local function spawnFloatingFeedback(amountAdded)
+	-- 1. Create a Clone of the main label (matches your Font/Size/Style automatically)
+	local floatLabel = label:Clone()
+	floatLabel.Name = "FloatingFeedback"
+	floatLabel.Text = "+" .. formatMoney(amountAdded)
+	floatLabel.TextColor3 = TEXT_COLOR
+	floatLabel.BackgroundTransparency = 1
+	floatLabel.Parent = label.Parent -- Put it in the same GUI container
+
+	-- 2. Make sure it's on top but behind nothing crucial
+	floatLabel.ZIndex = label.ZIndex + 1
+
+	-- 3. Remove any scripts inside the clone (so it doesn't try to run logic)
+	for _, child in pairs(floatLabel:GetChildren()) do
+		if child:IsA("LocalScript") or child:IsA("Script") or child:IsA("UIScale") then 
+			child:Destroy() 
+		end
+	end
+
+	-- 4. Set Initial Position (Start exactly where the main Balance is)
+	floatLabel.Position = label.Position
+
+	-- 5. Animate (Float Up + Fade Out)
+	-- We move it UP by subtracting from the Y Scale/Offset
+	local targetPos = floatLabel.Position - UDim2.new(0, 0, FLOAT_DISTANCE, 0)
+
+	local tweenInfo = TweenInfo.new(FLOAT_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+	local moveTween = TweenService:Create(floatLabel, tweenInfo, {Position = targetPos})
+	local fadeTween = TweenService:Create(floatLabel, tweenInfo, {TextTransparency = 1, TextStrokeTransparency = 1})
+
+	moveTween:Play()
+	fadeTween:Play()
+
+	-- 6. Cleanup
+	Debris:AddItem(floatLabel, FLOAT_DURATION)
 end
 
 -- ============================================================================
 -- 🔄 UPDATE LOGIC
 -- ============================================================================
 local function updateDisplay()
-	-- Update the text using the Wallet value
 	label.Text = formatMoney(walletValue.Value)
 end
 
--- 1. Run immediately on load
+-- 1. Run immediately
 updateDisplay()
 
 -- 2. Connect to the .Changed event
--- This makes the label update INSTANTLY when the ATM transaction finishes.
-walletValue.Changed:Connect(function()
+walletValue.Changed:Connect(function(newValue)
+	-- CHECK: Did money go UP?
+	local difference = newValue - currentBalance
+
+	if difference > 0 then
+		-- Spawn the tablet-style floating text
+		spawnFloatingFeedback(difference)
+	end
+
+	-- Update logic
+	currentBalance = newValue
 	updateDisplay()
 end)
