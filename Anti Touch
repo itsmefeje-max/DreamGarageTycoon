@@ -1,0 +1,72 @@
+-- [[ SERVER SCRIPT: GreenPlateTeleport ]]
+-- Indicating what the script is for: Teleports player to their assigned plot's SpawnPoint when touched.
+-- USES: Your existing "OccupiedPlot" Attribute system for 0-latency lookup.
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
+
+local plate = script.Parent
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
+
+-- ⚙️ CONFIGURATION
+local COOLDOWN_TIME = 2 -- Seconds between teleports
+local SPAWN_PART_NAME = "SpawnPoint" -- Must match your Tycoon structure
+local SOUND_ID = "rbxassetid://9083627113" -- Matches your existing Teleport Sound
+local TELEPORT_OFFSET = Vector3.new(0, 5, 0) -- Slight height to prevent floor clipping
+
+-- 🛡️ STATE MANAGEMENT
+local debounces = {} -- Stores player cooldowns
+
+local function onTouch(hit)
+	local character = hit.Parent
+	local player = Players:GetPlayerFromCharacter(character)
+
+	-- 1. VALIDATION: Is it a player?
+	if not player then return end
+
+	-- 2. COOLDOWN CHECK: Prevent spam/crash
+	if debounces[player.UserId] and (os.clock() - debounces[player.UserId] < COOLDOWN_TIME) then
+		return
+	end
+	debounces[player.UserId] = os.clock()
+
+	-- 3. GET ASSIGNED PLOT (Using your Architecture)
+	-- Instead of looping through all plots (slow), we use the Attribute you set in TycoonHandler
+	local plotName = player:GetAttribute("OccupiedPlot")
+
+	if not plotName then
+		warn("⚠️ " .. player.Name .. " tried to teleport but does not own a plot yet.")
+		return
+	end
+
+	local plot = TycoonFolder:FindFirstChild(plotName)
+	if not plot then return end
+
+	-- 4. FIND SPAWN POINT
+	local spawnPoint = plot:FindFirstChild(SPAWN_PART_NAME)
+
+	if spawnPoint then
+		-- Play Sound (Polished feel)
+		local s = Instance.new("Sound")
+		s.SoundId = SOUND_ID
+		s.Volume = 0.5
+		s.Parent = plate
+		s:Play()
+		Debris:AddItem(s, 2)
+
+		-- Execute Teleport
+		if character.PrimaryPart then
+			character:PivotTo(spawnPoint.CFrame + TELEPORT_OFFSET)
+		else
+			-- Fallback if PrimaryPart is missing (Rare)
+			character:PivotTo(CFrame.new(spawnPoint.Position + TELEPORT_OFFSET))
+		end
+
+		print("✅ Teleported " .. player.Name .. " to " .. plotName)
+	else
+		warn("❌ Critical: Plot '" .. plotName .. "' is missing '" .. SPAWN_PART_NAME .. "'")
+	end
+end
+
+plate.Touched:Connect(onTouch)
