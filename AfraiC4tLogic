@@ -1,6 +1,6 @@
--- [[ LOCAL SCRIPT: AfraiC4tLogic (Final Aesthetic & Hierarchy Fix) ]]
+-- [[ LOCAL SCRIPT: AfraiC4tLogic (Final Aesthetic & Hierarchy Fix + Success Sound) ]]
 -- Indicating what the script is for: Handles Camera, Logic, and UI for AfraiC4t ATM.
--- FEATURES: Supports 'Buttons' Frame Hierarchy, Pop Animations, Sounds, and Dynamic Feedback.
+-- FEATURES: Buttons Hierarchy, Pop Animations, Sounds, Dynamic Feedback, and Cash SFX.
 
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
@@ -31,7 +31,7 @@ local GUI_ID = "UI_NPC_ATM_AfraiC4t"
 local CONTAINER_ID = "Frame_ATM_Container" 
 local TEXT_ID = "Text_ATM_Dialogue"         
 
--- BUTTON NAMES (Must match the names in your Explorer)
+-- BUTTON NAMES
 local BTN_WITHDRAW_ID = "Btn_ATM_Withdraw" 
 local BTN_INQUIRY_ID = "Btn_ATM_Inquiry"    
 local BTN_LEAVE_ID = "Btn_ATM_Leave"        
@@ -51,10 +51,11 @@ local LEAVE_DELAY = 2
 local TYPING_SOUND_ID = "rbxassetid://4676738150"
 local HOVER_SOUND_ID = "rbxassetid://6895079853" 
 local CLICK_SOUND_ID = "rbxassetid://9083627113" 
+local CASH_SFX_ID = "rbxassetid://2865227271" -- [NEW] Cash Register "Cha-Ching"
 
 -- ✨ ANIMATION SETTINGS
-local HOVER_SCALE = 1.1 -- Button grows by 10%
-local CLICK_SCALE = 0.9 -- Button shrinks on click
+local HOVER_SCALE = 1.1 
+local CLICK_SCALE = 0.9 
 local ANIM_SPEED = 0.1
 
 -- ============================================================================
@@ -97,7 +98,6 @@ task.spawn(function()
 	local myGui = playerGui:WaitForChild(GUI_ID, 10)
 	if myGui then
 		myGui.Enabled = false 
-		-- We use true to find the container recursively
 		local container = myGui:FindFirstChild(CONTAINER_ID, true)
 		if container then
 			container.Visible = false 
@@ -114,7 +114,7 @@ local function clearConnections()
 		if conn then conn:Disconnect() end
 	end
 	buttonConnections = {}
-	
+
 	for _, conn in pairs(buttonHoverConnections) do
 		if conn then conn:Disconnect() end
 	end
@@ -188,40 +188,35 @@ end
 
 -- ✨ AESTHETIC BUTTON ANIMATOR
 local function animateButton(btn)
-	-- Capture original size safely
 	if not btn:GetAttribute("OriginalSizeX") then
 		btn:SetAttribute("OriginalSizeX", btn.Size.X.Scale)
 		btn:SetAttribute("OriginalSizeXO", btn.Size.X.Offset)
 		btn:SetAttribute("OriginalSizeY", btn.Size.Y.Scale)
 		btn:SetAttribute("OriginalSizeYO", btn.Size.Y.Offset)
 	end
-	
+
 	local origX = btn:GetAttribute("OriginalSizeX")
 	local origXO = btn:GetAttribute("OriginalSizeXO")
 	local origY = btn:GetAttribute("OriginalSizeY")
 	local origYO = btn:GetAttribute("OriginalSizeYO")
-	
+
 	local normalSize = UDim2.new(origX, origXO, origY, origYO)
 	local hoverSize = UDim2.new(origX * HOVER_SCALE, origXO * HOVER_SCALE, origY * HOVER_SCALE, origYO * HOVER_SCALE)
 	local clickSize = UDim2.new(origX * CLICK_SCALE, origXO * CLICK_SCALE, origY * CLICK_SCALE, origYO * CLICK_SCALE)
 
-	-- Hover Enter
 	local connEnter = btn.MouseEnter:Connect(function()
 		playSound(HOVER_SOUND_ID, 0.5)
 		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = hoverSize}):Play()
 	end)
-	
-	-- Hover Leave
+
 	local connLeave = btn.MouseLeave:Connect(function()
 		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = normalSize}):Play()
 	end)
-	
-	-- Click Down
+
 	local connDown = btn.MouseButton1Down:Connect(function()
 		TweenService:Create(btn, TweenInfo.new(0.05), {Size = clickSize}):Play()
 	end)
-	
-	-- Click Up
+
 	local connUp = btn.MouseButton1Up:Connect(function()
 		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = hoverSize}):Play()
 	end)
@@ -253,18 +248,15 @@ local function startInteraction(npcModel)
 	camera.CameraType = Enum.CameraType.Scriptable
 	TweenService:Create(camera, TWEEN_INFO, {CFrame = camPart.CFrame}):Play()
 
-	-- ✅ FIND GUI
 	local myGui = playerGui:WaitForChild(GUI_ID, 5)
 	if not myGui then warn("❌ Missing GUI") stopInteraction() return end
 
 	myGui.Enabled = true
-	-- ✅ FIND CONTAINER
 	local container = myGui:FindFirstChild(CONTAINER_ID, true) 
 	if not container then warn("❌ Missing Frame") stopInteraction() return end
 
 	container.Visible = true
 
-	-- ✅ FIND TEXT
 	local dialogueLabel = container:FindFirstChild(TEXT_ID, true)
 	if dialogueLabel then
 		-- 1. READ ATM BALANCE
@@ -288,18 +280,14 @@ local function startInteraction(npcModel)
 		typewrite(dialogueLabel, greeting)
 
 		-- ==============================
-		-- 🔘 BUTTON SETUP (HIERARCHY SAFE)
+		-- 🔘 BUTTON SETUP
 		-- ==============================
 
 		local function connectBtn(btnName, func)
-			-- 🛡️ RECURSIVE FIND: Will find the button even inside "Buttons" frame
 			local btn = myGui:FindFirstChild(btnName, true)
-			
 			if btn and btn:IsA("GuiButton") then
-				-- APPLY AESTHETICS
 				animateButton(btn) 
-				
-				-- CONNECT CLICK LOGIC
+
 				local conn = btn.MouseButton1Click:Connect(function()
 					playSound(CLICK_SOUND_ID, 0.5) 
 					func()
@@ -310,7 +298,6 @@ local function startInteraction(npcModel)
 			end
 		end
 
-		-- 1. LEAVE BUTTON
 		connectBtn(BTN_LEAVE_ID, function()
 			if isLeaving then return end
 			isLeaving = true 
@@ -325,7 +312,6 @@ local function startInteraction(npcModel)
 			stopInteraction()
 		end)
 
-		-- 2. INQUIRY BUTTON
 		connectBtn(BTN_INQUIRY_ID, function()
 			if dialogueLabel then
 				local guide = "<b>MY GUIDE:</b>\n\n" ..
@@ -336,7 +322,7 @@ local function startInteraction(npcModel)
 			end
 		end)
 
-		-- 3. WITHDRAW BUTTON
+		-- 3. WITHDRAW BUTTON (UPDATED WITH SOUND)
 		connectBtn(BTN_WITHDRAW_ID, function()
 			if currentATM <= 0 then
 				typewrite(dialogueLabel, "You have no funds here to withdraw.")
@@ -348,12 +334,15 @@ local function startInteraction(npcModel)
 			local success, msg = withdrawFunc:InvokeServer(currentATM, "Withdraw")
 
 			if success then
-				-- ✅ DYNAMIC SUCCESS MESSAGE
+				-- ✅ PLAY CASH SOUND
+				playSound(CASH_SFX_ID, 1.0)
+
+				-- ✅ DYNAMIC MESSAGE
 				local coloredName = "<font color='" .. NAME_COLOR .. "'>" .. player.Name .. "</font>"
 				local coloredAmount = "<font color='" .. MONEY_COLOR .. "'>$" .. formatNumber(currentATM) .. "</font>"
-				
+
 				local successMsg = "Hi " .. coloredName .. ", you have successfully withdrawn " .. coloredAmount .. "."
-				
+
 				typewrite(dialogueLabel, successMsg)
 				task.wait(2.5) 
 				stopInteraction()
@@ -364,9 +353,6 @@ local function startInteraction(npcModel)
 	end
 end
 
--- ============================================================================
--- ⚡ SETUP
--- ============================================================================
 local function setupATM()
 	local folder = Workspace:WaitForChild(NPC_FOLDER)
 	local npc = folder:WaitForChild(TARGET_NPC, 10)
