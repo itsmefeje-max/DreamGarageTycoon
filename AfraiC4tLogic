@@ -1,4 +1,4 @@
--- [[ LOCAL SCRIPT: AfraiC4tLogic (Final Aesthetic & Hierarchy Fix + Success Sound) ]]
+-- [[ LOCAL SCRIPT: AfraiC4tLogic (Processing Delay + Movement Fix + Mobile Patch) ]]
 -- Indicating what the script is for: Handles Camera, Logic, and UI for AfraiC4t ATM.
 -- FEATURES: Buttons Hierarchy, Pop Animations, Sounds, Dynamic Feedback, and Cash SFX.
 
@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
+local UserInputService = game:GetService("UserInputService") -- ✅ ADDED FOR MOBILE FIX
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
@@ -174,8 +175,14 @@ local function stopInteraction()
 	camera.CameraType = Enum.CameraType.Custom
 	if controls then controls:Enable() end
 
-	if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-		player.Character.HumanoidRootPart.Anchored = false
+	if player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+		
+		if hrp then hrp.Anchored = false end
+		
+		-- ✅ MOVEMENT FIX: Restore speed so they can walk again
+		if humanoid then humanoid.WalkSpeed = 16 end
 	end
 
 	local myGui = playerGui:FindFirstChild(GUI_ID)
@@ -204,25 +211,30 @@ local function animateButton(btn)
 	local hoverSize = UDim2.new(origX * HOVER_SCALE, origXO * HOVER_SCALE, origY * HOVER_SCALE, origYO * HOVER_SCALE)
 	local clickSize = UDim2.new(origX * CLICK_SCALE, origXO * CLICK_SCALE, origY * CLICK_SCALE, origYO * CLICK_SCALE)
 
-	local connEnter = btn.MouseEnter:Connect(function()
-		playSound(HOVER_SOUND_ID, 0.5)
-		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = hoverSize}):Play()
-	end)
+	-- 🛡️ MOBILE FIX: Only connect Hover effects if NOT on touch device
+	if not UserInputService.TouchEnabled then
+		local connEnter = btn.MouseEnter:Connect(function()
+			playSound(HOVER_SOUND_ID, 0.5)
+			TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = hoverSize}):Play()
+		end)
 
-	local connLeave = btn.MouseLeave:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = normalSize}):Play()
-	end)
+		local connLeave = btn.MouseLeave:Connect(function()
+			TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = normalSize}):Play()
+		end)
+		
+		table.insert(buttonHoverConnections, connEnter)
+		table.insert(buttonHoverConnections, connLeave)
+	end
 
 	local connDown = btn.MouseButton1Down:Connect(function()
 		TweenService:Create(btn, TweenInfo.new(0.05), {Size = clickSize}):Play()
 	end)
 
 	local connUp = btn.MouseButton1Up:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = hoverSize}):Play()
+		local target = (not UserInputService.TouchEnabled) and hoverSize or normalSize
+		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = target}):Play()
 	end)
 
-	table.insert(buttonHoverConnections, connEnter)
-	table.insert(buttonHoverConnections, connLeave)
 	table.insert(buttonHoverConnections, connDown)
 	table.insert(buttonHoverConnections, connUp)
 end
@@ -241,8 +253,20 @@ local function startInteraction(npcModel)
 	end
 
 	if controls then controls:Disable() end
-	if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-		player.Character.HumanoidRootPart.Anchored = true 
+	
+	-- ✅ MOVEMENT FIX: Kill speed and velocity to prevent "Walking in Place" bug
+	if player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+		
+		if humanoid then 
+			humanoid.WalkSpeed = 0 -- Forces animation to Idle
+		end
+		
+		if hrp then
+			hrp.Velocity = Vector3.zero -- Stops sliding
+			hrp.Anchored = true 
+		end
 	end
 
 	camera.CameraType = Enum.CameraType.Scriptable
@@ -322,14 +346,16 @@ local function startInteraction(npcModel)
 			end
 		end)
 
-		-- 3. WITHDRAW BUTTON (UPDATED WITH SOUND)
+		-- 3. WITHDRAW BUTTON (UPDATED)
 		connectBtn(BTN_WITHDRAW_ID, function()
 			if currentATM <= 0 then
 				typewrite(dialogueLabel, "You have no funds here to withdraw.")
 				return
 			end
 
+			-- ✅ PROCESSING DELAY IMPLEMENTATION
 			typewrite(dialogueLabel, "Processing withdrawal...")
+			task.wait(2) -- Prolongs the state as requested
 
 			local success, msg = withdrawFunc:InvokeServer(currentATM, "Withdraw")
 
