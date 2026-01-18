@@ -2,7 +2,6 @@
 -- Handles: Cash Generation Loop & CPS Calculation
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local Players = game:GetService("Players")
 
 -- 🛠️ Load Module Safely
 local CarStats = require(ReplicatedStorage:WaitForChild("CarStats"))
@@ -23,22 +22,22 @@ local function getLinkedCarValue(pad)
 		if prim then return prim.Value end
 	end
 
-	-- 3. Fallback: Scan children (if PrimaryPart isn't set)
+	-- 3. Fallback: Scan children
 	for _, child in pairs(pad:GetChildren()) do
 		local val = child:FindFirstChild("LinkedCar")
 		if val then return val.Value end
 	end
-	
+
 	return nil
 end
 
 -- 💰 MAIN ECONOMY LOOP
 task.spawn(function()
 	print("💰 TycoonEconomy: System Active & Monitoring...")
-	
+
 	while true do
 		task.wait(PAY_INTERVAL)
-		
+
 		for _, plot in pairs(TycoonFolder:GetChildren()) do
 			-- Ensure plot handles exist
 			local pendingValue = plot:FindFirstChild("PendingEarnings")
@@ -46,12 +45,11 @@ task.spawn(function()
 
 			if pendingValue and padsFolder then
 				local plotTotalIncome = 0
-				
+
 				-- Scan all pads
 				for _, pad in pairs(padsFolder:GetChildren()) do
-					-- 🛠️ FIX: Use helper to find value safely
 					local linkedCar = getLinkedCarValue(pad)
-					
+
 					if linkedCar and linkedCar.Parent then
 						local stats = CarStats.Cars[linkedCar.Name]
 						if stats then
@@ -64,13 +62,13 @@ task.spawn(function()
 						end
 					end
 				end
-				
-				-- 1. Deposit earnings
+
+				-- 1. Deposit earnings (INTEGER SAFE)
 				if plotTotalIncome > 0 then
-					pendingValue.Value = pendingValue.Value + plotTotalIncome
+					pendingValue.Value = pendingValue.Value + math.floor(plotTotalIncome)
 				end
 
-				-- 2. [NEW] Save CPS for the Display Script to see
+				-- 2. Save CPS for the Display Script
 				plot:SetAttribute("CurrentCPS", plotTotalIncome)
 			end
 		end
