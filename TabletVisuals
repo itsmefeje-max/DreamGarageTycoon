@@ -1,5 +1,7 @@
--- [[ LOCAL SCRIPT: TabletVisuals (Fixed Ownership Check) ]]
+-- [[ LOCAL SCRIPT: TabletVisuals (Mobile Click Fix) ]]
 -- -- Indicating what the script is for: Handles Interactions, Separate Visibility/Click Ranges, and Floating Feedback.
+-- -- UPDATE: Switched action logic to MouseButton1Click for reliable mobile support.
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -7,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local Debris = game:GetService("Debris")
+local UserInputService = game:GetService("UserInputService") -- Service for Mobile Detection
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -31,8 +34,8 @@ local START_OFFSET = Vector3.new(0, 2, 0)
 
 -- 🔊 SOUNDS
 local HOVER_SOUND_ID = "rbxassetid://6895079853" 
-local CLICK_SOUND_ID = "rbxassetid://9083627113"      
-local FAIL_SOUND_ID = "rbxassetid://3779045779"       
+local CLICK_SOUND_ID = "rbxassetid://9083627113"       
+local FAIL_SOUND_ID = "rbxassetid://3779045779"        
 local SUCCESS_SOUND_ID = "rbxassetid://140072726814802" 
 local HOVER_VOLUME = 0.5
 
@@ -99,7 +102,7 @@ local function spawnFloatingText(targetPart, text, color, duration)
 end
 
 -- ============================================================================
--- 🎨 SIMPLE POP ANIMATION
+-- 🎨 ROBUST ANIMATION & CLICK HANDLER
 -- ============================================================================
 local function setupAnimatedButton(button, clickFunction)
 	if not button:IsA("GuiButton") then return end
@@ -107,26 +110,36 @@ local function setupAnimatedButton(button, clickFunction)
 	local hoverSize = UDim2.new(originalSize.X.Scale * HOVER_SCALE, originalSize.X.Offset * HOVER_SCALE, originalSize.Y.Scale * HOVER_SCALE, originalSize.Y.Offset * HOVER_SCALE)
 	local clickSize = UDim2.new(originalSize.X.Scale * CLICK_SCALE, originalSize.X.Offset * CLICK_SCALE, originalSize.Y.Scale * CLICK_SCALE, originalSize.Y.Offset * CLICK_SCALE)
 
-	button.MouseEnter:Connect(function()
-		isHoveringMap[button] = true
-		TweenService:Create(button, TweenInfo.new(ANIM_SPEED), {Size = hoverSize}):Play()
-		local s = Instance.new("Sound");
-		s.SoundId = HOVER_SOUND_ID; s.Volume = HOVER_VOLUME; s.Parent = SoundService; s:Play();
-		game.Debris:AddItem(s,1)
-	end)
+	-- 1. HOVER LOGIC (PC Only - to prevent Mobile Double Tap)
+	if not UserInputService.TouchEnabled then
+		button.MouseEnter:Connect(function()
+			isHoveringMap[button] = true
+			TweenService:Create(button, TweenInfo.new(ANIM_SPEED), {Size = hoverSize}):Play()
+			local s = Instance.new("Sound");
+			s.SoundId = HOVER_SOUND_ID; s.Volume = HOVER_VOLUME; s.Parent = SoundService; s:Play();
+			game.Debris:AddItem(s,1)
+		end)
 
-	button.MouseLeave:Connect(function()
-		isHoveringMap[button] = false
-		TweenService:Create(button, TweenInfo.new(ANIM_SPEED), {Size = originalSize}):Play()
-	end)
+		button.MouseLeave:Connect(function()
+			isHoveringMap[button] = false
+			TweenService:Create(button, TweenInfo.new(ANIM_SPEED), {Size = originalSize}):Play()
+		end)
+	end
 
+	-- 2. PRESS ANIMATION (Visual Feedback Only)
 	button.MouseButton1Down:Connect(function()
 		TweenService:Create(button, TweenInfo.new(0.05), {Size = clickSize}):Play() 
 	end)
 
+	-- 3. RELEASE ANIMATION (Visual Feedback Only)
 	button.MouseButton1Up:Connect(function()
-		local target = isHoveringMap[button] and hoverSize or originalSize
+		local target = (isHoveringMap[button] and not UserInputService.TouchEnabled) and hoverSize or originalSize
 		TweenService:Create(button, TweenInfo.new(ANIM_SPEED, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = target}):Play()
+	end)
+
+	-- 4. ACTION LOGIC (THE FIX: Uses Click instead of Up)
+	-- MouseButton1Click fires reliably on mobile even if the finger wiggles slightly.
+	button.MouseButton1Click:Connect(function()
 		if clickFunction then clickFunction() end
 	end)
 end
@@ -155,7 +168,7 @@ local function setupClientTablet(plot)
 	if not claimGui then return end
 
 	local pendingVal = plot:WaitForChild("PendingEarnings", 10)
-	local ownerVal = plot:WaitForChild("Owner", 10) -- ✅ FIX: Get Owner Value to check access
+	local ownerVal = plot:WaitForChild("Owner", 10) 
 
 	enableClicking(claimGui, claimPart)
 
