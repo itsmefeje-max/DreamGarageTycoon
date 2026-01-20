@@ -1,20 +1,41 @@
--- [[ SERVER SCRIPT: PadController (Bug-Free Senior Edition) ]]
--- [[ FIXES: "Ghost Lock" Bug, Transaction Safety, Folder Logic ]]
+-- [[ SERVER SCRIPT: PadController (Refactored & Secure) ]]
+-- [[ FIXES: Transaction Order (Anti-Dupe), Ghost-Lock Auto-Correction, Modular Logic ]]
 
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 local StarterPack = game:GetService("StarterPack")
 local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
 
-local VERTICAL_OFFSET = 5
-local PROMPT_RANGE = 14
-local MAX_CHECK_DIST = 20
-local EJECT_HEIGHT = 5
-local EJECT_DISTANCE = 4
+-- ⚙️ CONFIGURATION
+local CONSTANTS = {
+	VERTICAL_OFFSET = 5,
+	PROMPT_RANGE = 14,
+	MAX_CHECK_DIST = 20,
+	EJECT_HEIGHT = 5,
+	EJECT_DISTANCE = 4,
+	RETRY_DELAY = 0.2
+}
 
+-- 📂 ASSETS
 local CarModels = ServerStorage:WaitForChild("CarModels")
 local CarTools = ServerStorage:WaitForChild("CarTools")
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
+
+-- 🛡️ STATE MANAGEMENT
+local processingTracks = {} -- [PlayerUserId] = true (Prevents spamming multiple pads)
+
+-- ============================================================================
+-- 🛠️ HELPER FUNCTIONS
+-- ============================================================================
+
+local function getMainPart(obj)
+	if obj:IsA("BasePart") then return obj end
+	if obj:IsA("Model") then
+		return obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+	end
+	return nil
+end
 
 local function getPlotFolder(obj)
 	local current = obj
@@ -25,196 +46,278 @@ local function getPlotFolder(obj)
 	return nil
 end
 
-local function getMainPart(obj)
-	if obj:IsA("BasePart") then return obj end
-	if obj:IsA("Model") then
-		return obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-	end
-	return nil
-end
-
 local function isCloseEnough(player, padPart)
 	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return false end
 	local dist = (player.Character.HumanoidRootPart.Position - padPart.Position).Magnitude
-	return dist <= MAX_CHECK_DIST
+	return dist <= CONSTANTS.MAX_CHECK_DIST
 end
+
+-- 🧹 GHOST LOCK FIX: Resets pad if data is desynced
+local function validatePadState(occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
+	local car = linkedCarVal.Value
+	
+	-- Case 1: Pad says occupied, but car is missing/destroyed
+	if occupiedVal.Value == true and (not car or not car.Parent) then
+		warn("👻 Ghost Lock Detected on Pad! Auto-Resetting...")
+		occupiedVal.Value = false
+		linkedCarVal.Value = nil
+		placePrompt.Enabled = true
+		pickupPrompt.Enabled = false
+	
+	-- Case 2: Pad says empty, but prompts are wrong
+	elseif occupiedVal.Value == false then
+		if not placePrompt.Enabled or pickupPrompt.Enabled then
+			placePrompt.Enabled = true
+			pickupPrompt.Enabled = false
+		end
+	end
+end
+
+-- ============================================================================
+-- 📦 TRANSACTION FUNCTIONS
+-- ============================================================================
+
+-- 🗑️ REMOVE TOOL (Transaction Step 1)
+-- Returns true if successful, false if tool missing
+local function removeToolFromPlayer(player, toolName)
+	local backpackTool = player.Backpack:FindFirstChild(toolName)
+	local characterTool = player.Character and player.Character:FindFirstChild(toolName)
+	local gearTool = player.StarterGear:FindFirstChild(toolName)
+	
+	local found = false
+	
+	if backpackTool then backpackTool:Destroy(); found = true end
+	if characterTool then characterTool:Destroy(); found = true end
+	
+	-- CRITICAL: Remove from StarterGear so it doesn't come back on respawn
+	if gearTool then gearTool:Destroy() end 
+	
+	return found
+end
+
+-- 🚗 SPAWN CAR (Transaction Step 2)
+local function spawnCarOnPad(padPart, carModel, plot)
+	local placedCar = carModel:Clone()
+	local padTop = padPart.CFrame * CFrame.new(0, (padPart.Size.Y / 2) + CONSTANTS.VERTICAL_OFFSET + 1, 0)
+	placedCar:PivotTo(padTop)
+
+	local carFolder = plot:FindFirstChild("PlacedCars")
+	if not carFolder then
+		carFolder = Instance.new("Folder", plot)
+		carFolder.Name = "PlacedCars"
+	end
+	placedCar.Parent = carFolder
+
+	-- Physics Lock
+	for _, part in pairs(placedCar:GetDescendants()) do
+		if part:IsA("BasePart") then 
+			part.Anchored = true
+			part.CanCollide = true 
+		end
+	end
+	
+	return placedCar
+end
+
+-- 🔊 SOUND FX
+local function playSound(name, parent)
+	local sFolder = game.ReplicatedStorage:FindFirstChild("GameSounds")
+	if sFolder and sFolder:FindFirstChild(name) then
+		local s = sFolder[name]:Clone()
+		s.Parent = parent
+		s:Play()
+		Debris:AddItem(s, 2)
+	end
+end
+
+-- ============================================================================
+-- 🎮 INTERACTION LOGIC
+-- ============================================================================
+
+local function AttemptPlace(player, padObject, padPart, occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
+	-- 1. CHECKS
+	if occupiedVal.Value then return end
+	local thisPlot = getPlotFolder(padObject)
+	if not thisPlot or player:GetAttribute("OccupiedPlot") ~= thisPlot.Name then return end
+	if not isCloseEnough(player, padPart) then return end
+
+	-- 2. GET TOOL
+	local tool = player.Character:FindFirstChildWhichIsA("Tool")
+	if not tool then return end
+
+	local cleanName = tool.Name:gsub(" Item", ""):gsub("Item", "")
+	local realCar = CarModels:FindFirstChild(cleanName)
+
+	if realCar then
+		local toolName = tool.Name
+		
+		-- 🛑 TRANSACTION START: Remove Item FIRST (Prevents Duplication)
+		local removed = removeToolFromPlayer(player, toolName)
+		
+		if removed then
+			-- 3. SPAWN CAR
+			local success, result = pcall(function()
+				return spawnCarOnPad(padPart, realCar, thisPlot)
+			end)
+
+			if success and result then
+				-- ✅ SUCCESS
+				occupiedVal.Value = true
+				linkedCarVal.Value = result
+				placePrompt.Enabled = false
+				pickupPrompt.Enabled = true
+				
+				-- Eject Player
+				if player.Character then
+					local edgeOffset = (padPart.Size.Z / 2) + CONSTANTS.EJECT_DISTANCE
+					local safeSpot = padPart.CFrame * CFrame.new(0, CONSTANTS.EJECT_HEIGHT, edgeOffset)
+					local lookAtCar = CFrame.lookAt(safeSpot.Position, padPart.Position)
+					player.Character:PivotTo(lookAtCar)
+				end
+				
+				playSound("PlaceSound", padPart)
+			else
+				-- ⚠️ CRITICAL FAILURE (Spawn failed) -> REFUND ITEM
+				warn("⚠️ Spawn Failed! Refunding item to " .. player.Name)
+				local originalTool = CarTools:FindFirstChild(toolName) or StarterPack:FindFirstChild(toolName)
+				if originalTool then
+					originalTool:Clone().Parent = player.Backpack
+				end
+			end
+		end
+	else
+		warn("⚠️ Invalid Car Tool: " .. tool.Name)
+	end
+end
+
+local function AttemptPickup(player, padObject, padPart, occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
+	-- 1. CHECKS
+	local thisPlot = getPlotFolder(padObject)
+	if not thisPlot or player:GetAttribute("OccupiedPlot") ~= thisPlot.Name then return end
+	if not isCloseEnough(player, padPart) then return end
+
+	-- 2. IDENTIFY CAR
+	local carToRemove = linkedCarVal.Value
+	if not carToRemove then 
+		-- Ghost lock detected during interaction
+		validatePadState(occupiedVal, linkedCarVal, placePrompt, pickupPrompt) 
+		return 
+	end
+
+	local carName = carToRemove.Name
+	local foundTool = nil
+
+	-- Search for Tool
+	local possibleNames = {carName, carName .. " Item", carName .. "Item"}
+	for _, name in ipairs(possibleNames) do
+		foundTool = CarTools:FindFirstChild(name) or StarterPack:FindFirstChild(name)
+		if foundTool then break end
+	end
+
+	if foundTool then
+		-- 3. GIVE ITEM
+		local newTool = foundTool:Clone()
+		newTool.Parent = player.Backpack
+		foundTool:Clone().Parent = player.StarterGear -- Persist on death
+
+		-- 4. DESTROY CAR
+		carToRemove:Destroy()
+
+		-- 5. RESET PAD
+		occupiedVal.Value = false
+		linkedCarVal.Value = nil
+		placePrompt.Enabled = true
+		pickupPrompt.Enabled = false
+		
+		playSound("EquipSound", padPart)
+	else
+		warn("❌ CRITICAL: Tool not found for " .. carName .. ". Pickup aborted to prevent loss.")
+	end
+end
+
+-- ============================================================================
+-- 🚀 SETUP
+-- ============================================================================
 
 local function setupPad(padObject)
 	local padPart = getMainPart(padObject)
 	if not padPart then return end
 
-	-- Cleanup old prompts
+	-- Cleanup
 	for _, child in pairs(padPart:GetChildren()) do
 		if child:IsA("ProximityPrompt") then child:Destroy() end
 	end
 
+	-- Objects
 	local occupiedVal = padPart:FindFirstChild("IsOccupied") or Instance.new("BoolValue", padPart)
 	occupiedVal.Name = "IsOccupied"
-
 	local linkedCarVal = padPart:FindFirstChild("LinkedCar") or Instance.new("ObjectValue", padPart)
 	linkedCarVal.Name = "LinkedCar"
 
+	-- Prompts
 	local placePrompt = Instance.new("ProximityPrompt", padPart)
 	placePrompt.Name = "PlacePrompt"; placePrompt.ActionText = "Place Car"; placePrompt.ObjectText = "Car Pad"
-	placePrompt.HoldDuration = 0.5; placePrompt.MaxActivationDistance = PROMPT_RANGE; placePrompt.RequiresLineOfSight = false
+	placePrompt.MaxActivationDistance = CONSTANTS.PROMPT_RANGE; placePrompt.RequiresLineOfSight = false
 
 	local pickupPrompt = Instance.new("ProximityPrompt", padPart)
 	pickupPrompt.Name = "PickupPrompt"; pickupPrompt.ActionText = "Pick Up"; pickupPrompt.ObjectText = "Occupied Pad"
-	pickupPrompt.HoldDuration = 0.5; pickupPrompt.MaxActivationDistance = PROMPT_RANGE; pickupPrompt.RequiresLineOfSight = false
+	pickupPrompt.MaxActivationDistance = CONSTANTS.PROMPT_RANGE; pickupPrompt.RequiresLineOfSight = false
 	pickupPrompt.Enabled = false
 
-	-- Sync State
-	if occupiedVal.Value == true then
-		placePrompt.Enabled = false; pickupPrompt.Enabled = true
-	else
-		placePrompt.Enabled = true; pickupPrompt.Enabled = false
-	end
+	-- Initial Validate
+	validatePadState(occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
 
-	local isProcessing = false
-
-	-- ========================================================================
-	-- 🚗 PLACE LOGIC
-	-- ========================================================================
+	-- ⚡ CONNECT PLACE
 	placePrompt.Triggered:Connect(function(player)
-		if isProcessing or occupiedVal.Value then return end
-		isProcessing = true
-
-		local thisPlot = getPlotFolder(padObject)
-		if not thisPlot or player:GetAttribute("OccupiedPlot") ~= thisPlot.Name then isProcessing = false; return end
-
-		if not isCloseEnough(player, padPart) then isProcessing = false; return end
-
-		local tool = player.Character:FindFirstChildWhichIsA("Tool")
-		if tool then
-			-- Robust Name Matching
-			local cleanName = tool.Name:gsub(" Item", ""):gsub("Item", "")
-			local realCar = CarModels:FindFirstChild(cleanName)
-
-			if realCar then
-				local toolName = tool.Name -- Save name before destroying
-
-				-- 1. SPAWN CAR FIRST (Try Logic)
-				local placedCar = realCar:Clone()
-				local padTop = padPart.CFrame * CFrame.new(0, (padPart.Size.Y / 2) + VERTICAL_OFFSET + 1, 0)
-				placedCar:PivotTo(padTop)
-
-				local carFolder = thisPlot:FindFirstChild("PlacedCars")
-				if not carFolder then
-					carFolder = Instance.new("Folder", thisPlot)
-					carFolder.Name = "PlacedCars"
-				end
-				placedCar.Parent = carFolder
-
-				-- Anchor safely
-				for _, part in pairs(placedCar:GetDescendants()) do
-					if part:IsA("BasePart") then part.Anchored = true; part.CanCollide = true end
-				end
-
-				-- 2. LOCK PAD (Only after spawn success)
-				occupiedVal.Value = true
-				linkedCarVal.Value = placedCar
-
-				-- 3. REMOVE TOOL (Transaction Complete)
-				tool:Destroy()
-				if player:FindFirstChild("StarterGear") then
-					for _, gTool in pairs(player.StarterGear:GetChildren()) do
-						if gTool.Name == toolName then gTool:Destroy() end
-					end
-				end
-
-				-- 4. UPDATE UI & EJECT
-				placePrompt.Enabled = false
-				pickupPrompt.Enabled = true
-
-				if player.Character then
-					local edgeOffset = (padPart.Size.Z / 2) + EJECT_DISTANCE
-					local safeSpot = padPart.CFrame * CFrame.new(0, EJECT_HEIGHT, edgeOffset)
-					local lookAtCar = CFrame.lookAt(safeSpot.Position, padPart.Position)
-					player.Character:PivotTo(lookAtCar)
-				end
-
-				-- Sound
-				local sFolder = game.ReplicatedStorage:FindFirstChild("GameSounds")
-				if sFolder and sFolder:FindFirstChild("PlaceSound") then
-					local s = sFolder.PlaceSound:Clone(); s.Parent = padPart; s:Play(); Debris:AddItem(s, 2)
-				end
-			else
-				warn("⚠️ Model mismatch: Tool '"..tool.Name.."' has no matching Model in CarModels.")
-			end
-		end
-		task.wait(0.2)
-		isProcessing = false
+		if processingTracks[player.UserId] then return end
+		processingTracks[player.UserId] = true
+		
+		AttemptPlace(player, padObject, padPart, occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
+		
+		task.wait(CONSTANTS.RETRY_DELAY)
+		processingTracks[player.UserId] = nil
 	end)
 
-	-- ========================================================================
-	-- 🎒 PICKUP LOGIC
-	-- ========================================================================
+	-- ⚡ CONNECT PICKUP
 	pickupPrompt.Triggered:Connect(function(player)
-		if isProcessing then return end
-		isProcessing = true
-
-		local thisPlot = getPlotFolder(padObject)
-		if not thisPlot or player:GetAttribute("OccupiedPlot") ~= thisPlot.Name then isProcessing = false; return end
-		if not isCloseEnough(player, padPart) then isProcessing = false; return end
-
-		local carToRemove = linkedCarVal.Value
-
-		if carToRemove then
-			local carName = carToRemove.Name
-			local foundTool = nil
-
-			-- Robust Tool Search
-			local possibleNames = {carName, carName .. " Item", carName .. "Item"}
-			for _, name in ipairs(possibleNames) do
-				local t = CarTools:FindFirstChild(name)
-				if t then foundTool = t:Clone(); break end
-			end
-
-			-- Fallback to StarterPack if ServerStorage failed
-			if not foundTool then
-				for _, name in ipairs(possibleNames) do
-					local t = StarterPack:FindFirstChild(name)
-					if t then foundTool = t:Clone(); break end
-				end
-			end
-
-			if foundTool then
-				-- Give Tool
-				foundTool.Parent = player.Backpack
-				foundTool:Clone().Parent = player.StarterGear
-
-				-- Destroy Car
-				carToRemove:Destroy()
-
-				-- Reset Pad
-				occupiedVal.Value = false
-				linkedCarVal.Value = nil
-				placePrompt.Enabled = true
-				pickupPrompt.Enabled = false
-
-				local sFolder = game.ReplicatedStorage:FindFirstChild("GameSounds")
-				if sFolder and sFolder:FindFirstChild("EquipSound") then
-					local s = sFolder.EquipSound:Clone(); s.Parent = padPart; s:Play(); Debris:AddItem(s, 2)
-				end
-			else
-				warn("⚠️ CRITICAL: Missing Tool for '" .. carName .. "'. Pickup aborted to prevent item loss.")
-			end
-		else
-			-- Clean reset if car was already deleted manually
-			occupiedVal.Value = false
-			linkedCarVal.Value = nil
-			placePrompt.Enabled = true
-			pickupPrompt.Enabled = false
-		end
-
-		task.wait(0.2)
-		isProcessing = false
+		if processingTracks[player.UserId] then return end
+		processingTracks[player.UserId] = true
+		
+		AttemptPickup(player, padObject, padPart, occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
+		
+		task.wait(CONSTANTS.RETRY_DELAY)
+		processingTracks[player.UserId] = nil
 	end)
 end
 
+-- MAIN LOOP
 for _, plot in pairs(TycoonFolder:GetChildren()) do
 	local padsFolder = plot:FindFirstChild("Pads")
 	if padsFolder then
 		for _, pad in pairs(padsFolder:GetChildren()) do setupPad(pad) end
 	end
 end
+
+-- Auto-fix any pads that glitch out while the server is running
+task.spawn(function()
+	while true do
+		task.wait(10) -- Check every 10 seconds
+		for _, plot in pairs(TycoonFolder:GetChildren()) do
+			local padsFolder = plot:FindFirstChild("Pads")
+			if padsFolder then
+				for _, padObject in pairs(padsFolder:GetChildren()) do
+					local padPart = getMainPart(padObject)
+					if padPart then
+						local occ = padPart:FindFirstChild("IsOccupied")
+						local lnk = padPart:FindFirstChild("LinkedCar")
+						local pl = padPart:FindFirstChild("PlacePrompt")
+						local pk = padPart:FindFirstChild("PickupPrompt")
+						if occ and lnk and pl and pk then
+							validatePadState(occ, lnk, pl, pk)
+						end
+					end
+				end
+			end
+		end
+	end
+end)
