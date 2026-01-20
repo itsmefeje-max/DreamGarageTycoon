@@ -20,16 +20,16 @@ end
 local function wipePlot(plot)
 	print("🧹 Wiping Plot: " .. plot.Name)
 	if plot:FindFirstChild("Owner") then plot.Owner.Value = "" end
-	
+
 	local pending = plot:FindFirstChild("PendingEarnings")
 	if pending then pending.Value = 0 end
-	
+
 	-- Clear Saved CPS Attribute
 	plot:SetAttribute("CurrentCPS", 0)
-	
+
 	-- Clean Entities
 	if plot:FindFirstChild("PlacedCars") then plot.PlacedCars:ClearAllChildren() end
-	
+
 	-- Reset Pads
 	if plot:FindFirstChild("Pads") then
 		for _, padObj in pairs(plot.Pads:GetChildren()) do
@@ -39,7 +39,7 @@ local function wipePlot(plot)
 				if occupied then occupied.Value = false end
 				local linkedCar = padPart:FindFirstChild("LinkedCar")
 				if linkedCar then linkedCar.Value = nil end
-				
+
 				local place = padPart:FindFirstChild("PlacePrompt")
 				local pickup = padPart:FindFirstChild("PickupPrompt")
 				if place then place.Enabled = true end
@@ -55,12 +55,12 @@ local function assignPlot(player)
 
 	for _, plot in pairs(TycoonFolder:GetChildren()) do
 		local ownerVal = plot:FindFirstChild("Owner")
-		
+
 		-- ✅ CHECK: Only claim if owner string is empty
 		if ownerVal and ownerVal.Value == "" then
 			-- 🛑 WIPE NOW (Safe time to wipe: right before new owner takes it)
 			wipePlot(plot)
-			
+
 			ownerVal.Value = player.Name
 			player:SetAttribute("OccupiedPlot", plot.Name)
 
@@ -89,31 +89,31 @@ Players.PlayerRemoving:Connect(function(player)
 	if plotName then
 		local plot = TycoonFolder:FindFirstChild(plotName)
 		if plot and plot:FindFirstChild("Owner") then
-			
+
 			print("🔒 Locking " .. plotName .. " until data saves...")
 			plot.Owner.Value = "" -- Visually release, but logically hold the plot
-			
+
 			-- ⏳ EVENT LISTENER (The Senior Fix)
 			-- Instead of guessing 4 seconds, we wait for the EXACT moment data is saved.
 			local didSave = false
 			local listener
 			local waitStart = os.clock()
-			
+
 			-- Listen for TycoonDataHandler to fire "TycoonSaveCompleted"
 			listener = SaveEvent.Event:Connect(function(savedName)
 				if savedName == player.Name then
 					didSave = true
 				end
 			end)
-			
+
 			-- WAIT LOOP: Wait until Saved OR Timeout (8 Seconds Failsafe)
 			-- If the DataHandler fails to fire, we force release after 8s.
 			repeat 
 				task.wait(0.1)
 			until didSave or (os.clock() - waitStart > 8)
-			
+
 			if listener then listener:Disconnect() end
-			
+
 			if didSave then
 				print("✅ Data Saved for " .. player.Name .. ". Releasing " .. plotName .. " immediately.")
 			else
