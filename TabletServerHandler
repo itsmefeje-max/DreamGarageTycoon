@@ -11,6 +11,7 @@ local Debris = game:GetService("Debris")
 local DEV_PRODUCT_ID = 3509697462
 local TYCOON_FOLDER_NAME = "Tycoons"
 local CLAIM_COOLDOWN = 1.5 
+local MAX_CLAIM_DISTANCE = 20 -- 🛡️ SECURITY: Max studs away to claim
 
 -- 🔊 SOUND CONFIGURATION
 local SUCCESS_SOUND = "rbxassetid://140072726814802" 
@@ -182,7 +183,7 @@ TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
 	local plot = TycoonFolder:FindFirstChild(plotName)
 	if not plot then return end
 
-	-- Security Check
+	-- Security Check 1: Ownership
 	if plot.Owner.Value ~= player.Name then return end
 
 	local pendingVal = plot:FindFirstChild("PendingEarnings")
@@ -191,6 +192,16 @@ TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
 	if model then claimPart = model:FindFirstChild("ClaimPart") end
 
 	if not pendingVal or not claimPart then return end
+
+	-- 🛡️ Security Check 2: Distance Verification (THE FIX)
+	-- Prevents "Infinite Range" exploits where players fire remote from across the map
+	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+	
+	local distance = (player.Character.HumanoidRootPart.Position - claimPart.Position).Magnitude
+	if distance > MAX_CLAIM_DISTANCE then
+		-- Fail silently to annoying exploiters, or warn for debugging
+		return 
+	end
 
 	if action == "Claim" then
 		-- Cooldown
@@ -225,7 +236,7 @@ end)
 MarketplaceService.ProcessReceipt = function(receiptInfo)
 	if receiptInfo.ProductId == DEV_PRODUCT_ID then
 		local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
-		
+
 		-- 1. Player Crashed/Left? Retry later.
 		-- Logic: If we return 'PurchaseGranted' now, they lose Robux and get nothing.
 		if not player then 
@@ -244,7 +255,7 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 
 		local pendingVal = plot.PendingEarnings
 		local amount = pendingVal.Value
-		
+
 		if amount > 0 then
 			pendingVal.Value = 0
 			local ls = player:FindFirstChild("leaderstats")
@@ -259,6 +270,6 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
-	
+
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
