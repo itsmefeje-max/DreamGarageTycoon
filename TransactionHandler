@@ -1,4 +1,6 @@
--- [[ SERVER SCRIPT: TransactionHandler (Dual Mode: Transfer & Withdraw) ]]
+-- [[ SERVER SCRIPT: TransactionHandler (Secure Edition) ]]
+-- [[ FIXES: ATM Security Bypass (Fail-Safe Implemented) ]]
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -14,12 +16,12 @@ local MAX_DISTANCE = 20 -- Studs (For Physical Withdraw only)
 local function TransferToATM(player, amount)
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then return false, "Data Error" end
-	
+
 	local bank = leaderstats:FindFirstChild("Cash")
 	local atm = leaderstats:FindFirstChild("ATMBalance")
-	
+
 	if not bank or not atm then return false, "Missing Values" end
-	
+
 	if bank.Value >= amount then
 		bank.Value = bank.Value - amount
 		atm.Value = atm.Value + amount
@@ -35,24 +37,33 @@ local function WithdrawFromATM(player, amount)
 	-- 🛑 DISTANCE CHECK (Security)
 	local npcFolder = Workspace:FindFirstChild(NPC_FOLDER_NAME)
 	local managerNPC = npcFolder and npcFolder:FindFirstChild(MANAGER_NAME)
+	
+	-- 🛡️ SECURITY FIX: Fail Safe Logic
 	if managerNPC then
 		local npcRoot = managerNPC:FindFirstChild("HumanoidRootPart") or managerNPC.PrimaryPart
 		local pRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		
 		if npcRoot and pRoot then
 			if (pRoot.Position - npcRoot.Position).Magnitude > MAX_DISTANCE then
 				return false, "You are too far from the ATM!"
 			end
+		else
+			-- Case: Player or NPC has no physical body loaded
+			return false, "Security Check Failed: Physics not loaded."
 		end
 	else
-		warn("⚠️ ATM Manager NPC not found. Security check skipped (Risky).")
+		-- Case: NPC is missing/deleted/not loaded
+		warn("⚠️ ATM Manager NPC missing. Transaction Denied for Security.")
+		return false, "ATM Unavailable: Security Verification Failed"
 	end
 
+	-- Logic proceeds ONLY if security check passed
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local atm = leaderstats and leaderstats:FindFirstChild("ATMBalance")
 	local wallet = leaderstats and leaderstats:FindFirstChild("Wallet")
-	
+
 	if not atm or not wallet then return false, "Data Error" end
-	
+
 	if atm.Value >= amount then
 		atm.Value = atm.Value - amount
 		wallet.Value = wallet.Value + amount
@@ -66,7 +77,7 @@ end
 -- [[ MAIN HANDLER ]]
 -- We now accept an 'actionType' ("Transfer" or "Withdraw")
 withdrawFunc.OnServerInvoke = function(player, amount, actionType)
-	
+
 	-- 1. Validate Input
 	if typeof(amount) ~= "number" or amount <= 0 or amount ~= amount then
 		return false, "Invalid Amount"
@@ -76,10 +87,10 @@ withdrawFunc.OnServerInvoke = function(player, amount, actionType)
 	-- 2. Route Request
 	if actionType == "Transfer" then
 		return TransferToATM(player, amount)
-		
+
 	elseif actionType == "Withdraw" then
 		return WithdrawFromATM(player, amount)
-		
+
 	else
 		-- Fallback (Safety)
 		warn("⚠️ Unknown Transaction Type: " .. tostring(actionType))
