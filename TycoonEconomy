@@ -1,43 +1,32 @@
--- [[ SERVER SCRIPT: TycoonEconomy (Accumulator Fix & Optimized) ]]
--- [[ FIXES: "Zero Income" Bug for Low-Tier Cars, Float Precision Loss ]]
+-- [[ SERVER SCRIPT: TycoonEconomy (Accumulator Fix & Audit Fixed) ]]
+-- [[ FIXES: "Zero Income" Bug, Name Mismatch Lookup ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 
--- 🛠️ Load Module Safely
 local CarStats = require(ReplicatedStorage:WaitForChild("CarStats"))
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
--- ⚙️ SETTINGS
-local PAY_INTERVAL = 1 -- Seconds
-
--- 🛡️ STATE MANAGEMENT (The Fix)
--- Stores fractional earnings (e.g., 0.5) so they don't get deleted by math.floor
+local PAY_INTERVAL = 1
 local profitAccumulator = {} 
 
--- 🛠️ HELPER: Find the 'LinkedCar' Value anywhere inside the pad
 local function getLinkedCarValue(pad)
-	-- 1. Check directly (if pad is a Part)
 	local direct = pad:FindFirstChild("LinkedCar")
 	if direct then return direct.Value end
 
-	-- 2. Check PrimaryPart (if pad is a Model)
 	if pad:IsA("Model") and pad.PrimaryPart then
 		local prim = pad.PrimaryPart:FindFirstChild("LinkedCar")
 		if prim then return prim.Value end
 	end
 
-	-- 3. Fallback: Scan children (if PrimaryPart isn't set)
 	for _, child in pairs(pad:GetChildren()) do
 		local val = child:FindFirstChild("LinkedCar")
 		if val then return val.Value end
 	end
-
 	return nil
 end
 
--- 💰 MAIN ECONOMY LOOP
 task.spawn(function()
 	print("💰 TycoonEconomy: System Active & Monitoring...")
 
@@ -45,20 +34,29 @@ task.spawn(function()
 		task.wait(PAY_INTERVAL)
 
 		for _, plot in pairs(TycoonFolder:GetChildren()) do
-			-- Ensure plot handles exist
 			local pendingValue = plot:FindFirstChild("PendingEarnings")
 			local padsFolder = plot:FindFirstChild("Pads")
 
 			if pendingValue and padsFolder then
 				local plotTotalCPS = 0
 
-				-- Scan all pads
 				for _, pad in pairs(padsFolder:GetChildren()) do
 					local linkedCar = getLinkedCarValue(pad)
 
-					-- Verify Car exists physically in Workspace
 					if linkedCar and linkedCar.Parent then
+						-- [[ AUDIT FIX: ROBUST LOOKUP ]]
 						local stats = CarStats.Cars[linkedCar.Name]
+
+						-- Fallback: Search by Display Name if direct key fails
+						if not stats then
+							for _, s in pairs(CarStats.Cars) do
+								if s.Name == linkedCar.Name then
+									stats = s
+									break
+								end
+							end
+						end
+
 						if stats then
 							plotTotalCPS = plotTotalCPS + stats.CPS
 						else
@@ -70,26 +68,16 @@ task.spawn(function()
 					end
 				end
 
-				-- 1. [FIX] ACCUMULATE FRACTIONS
-				-- Initialize accumulator for this plot if nil
 				if not profitAccumulator[plot] then profitAccumulator[plot] = 0 end
-				
-				-- Add current CPS to the "Bank" in memory
 				profitAccumulator[plot] = profitAccumulator[plot] + plotTotalCPS
-				
-				-- Calculate Payout (Whole Numbers Only)
+
 				local payout = math.floor(profitAccumulator[plot])
-				
+
 				if payout > 0 then
-					-- Deposit integer amount
 					pendingValue.Value = pendingValue.Value + payout
-					
-					-- Keep the remaining decimals (e.g., if we had 1.5, we pay 1, keep 0.5)
 					profitAccumulator[plot] = profitAccumulator[plot] - payout
 				end
 
-				-- 2. Update Display Attribute (Visuals)
-				-- We show the RAW CPS (including decimals) so the UI looks accurate
 				plot:SetAttribute("CurrentCPS", plotTotalCPS)
 			end
 		end
