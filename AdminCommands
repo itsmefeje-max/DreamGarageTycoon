@@ -1,29 +1,43 @@
--- [[ SERVER SCRIPT: AdminCommands (Advanced V2) ]]
--- USAGE: 
--- /give <target> <item>
--- /fly <target>
--- /unfly <target>
+-- [[ SERVER SCRIPT: AdminCommands (Final Polish) ]]
+-- FEATURES: Safe Flight, Accurate Inventory Limits, Multi-Word Items
+-- STATUS: Production Ready
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 
 -- ⚙️ CONFIGURATION
 local CarTools = ServerStorage:WaitForChild("CarTools") 
--- ⚠️ Ensure "FlyClient" is inside ServerStorage!
 local FlyScriptTemplate = ServerStorage:WaitForChild("FlyClient", 5) 
 
 local ADMIN_USER_IDS = {
 	[5512860740] = true, -- Your ID
 }
-local ALLOW_STUDIO_ADMIN = true 
+
+local IS_STUDIO = RunService:IsStudio()
+local MAX_INVENTORY_SIZE = 500 
+
+if IS_STUDIO then
+	print("⚠️ AdminCommands: Studio Mode - Everyone is Admin!")
+end
 
 if not FlyScriptTemplate then
-	warn("❌ CRITICAL: 'FlyClient' script is missing from ServerStorage! Flight commands will fail.")
+	warn("❌ CRITICAL: 'FlyClient' missing in ServerStorage!")
 end
 
 -- ============================================================================
--- 🎯 TARGET SELECTOR LOGIC
+-- 🛡️ HELPERS
 -- ============================================================================
+local function tagIssued(tool, originalName)
+	if not tool then return end
+	tool:SetAttribute("IssuedByServer", true)
+	tool:SetAttribute("IssuedAt", os.time())
+	tool:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
+	tool:SetAttribute("ToolId", originalName)
+	tool.CanBeDropped = false
+end
+
 local function getTargets(speaker, selector)
 	local targets = {}
 	local allPlayers = Players:GetPlayers()
@@ -35,7 +49,6 @@ local function getTargets(speaker, selector)
 	elseif selector == "@r" or selector == "random" then
 		if #allPlayers > 0 then table.insert(targets, allPlayers[math.random(1, #allPlayers)]) end
 	else
-		-- Name Match
 		for _, p in pairs(allPlayers) do
 			if p.Name:lower():sub(1, #selector) == selector:lower() then
 				table.insert(targets, p)
@@ -46,33 +59,31 @@ local function getTargets(speaker, selector)
 	return targets
 end
 
--- ============================================================================
--- ✈️ FLIGHT LOGIC
--- ============================================================================
-local function setFlight(player, shouldFly)
-	if not player.Character then return end
+-- ✅ ACCURATE COUNT: Mimics TycoonDataHandler's deduplication
+local function countUniqueTools(player)
+	local uniqueSet = {}
+	local count = 0
 	
-	-- 1. Clean up old flight script
-	local oldScript = player.Character:FindFirstChild("FlyClient")
-	if oldScript then 
-		-- We set a flag so the local script can clean up its own physics before dying
-		player.Character:SetAttribute("ForceStopFly", true)
-		task.wait(0.1)
-		oldScript:Destroy() 
-		player.Character:SetAttribute("ForceStopFly", nil)
+	local function scan(container)
+		if not container then return end
+		for _, child in pairs(container:GetChildren()) do
+			if child:IsA("Tool") then
+				-- Use ToolId if present (from saving), otherwise Name
+				local id = child:GetAttribute("ToolId") or child.Name
+				if not uniqueSet[id] then
+					uniqueSet[id] = true
+					count = count + 1
+				end
+			end
+		end
 	end
 
-	-- 2. Add new flight script
-	if shouldFly and FlyScriptTemplate then
-		local newScript = FlyScriptTemplate:Clone()
-		newScript.Parent = player.Character
-		newScript.Disabled = false
-	end
+	scan(player:FindFirstChild("Backpack"))
+	scan(player:FindFirstChild("StarterGear"))
+	
+	return count
 end
 
--- ============================================================================
--- 🎒 ITEM LOGIC
--- ============================================================================
 local function findToolCaseInsensitive(itemName)
 	local targetName = itemName:lower()
 	for _, tool in pairs(CarTools:GetChildren()) do
@@ -86,10 +97,38 @@ local function findToolCaseInsensitive(itemName)
 	return nil
 end
 
-local function giveItem(player, tool, quantity)
-	for i = 1, quantity do
-		tool:Clone().Parent = player.Backpack
-		tool:Clone().Parent = player.StarterGear
+-- ============================================================================
+-- ⚡ ACTION LOGIC
+-- ============================================================================
+local function setFlight(player, shouldFly)
+	if not player.Character then return end
+	
+	local oldScript = player.Character:FindFirstChild("FlyClient")
+	if oldScript then 
+		player.Character:SetAttribute("ForceStopFly", true)
+		task.wait(0.1) 
+		if oldScript then oldScript:Destroy() end
+		player.Character:SetAttribute("ForceStopFly", nil)
+	end
+
+	if shouldFly and FlyScriptTemplate then
+		local newScript = FlyScriptTemplate:Clone()
+		newScript.Parent = player.Character
+		newScript.Disabled = false
+	end
+end
+
+local function giveItem(player, tool)
+	-- Always give 1 to prevent desync
+	local backpackTool = tool:Clone()
+	tagIssued(backpackTool, tool.Name)
+	backpackTool.Parent = player.Backpack
+
+	local starterGear = player:FindFirstChild("StarterGear")
+	if starterGear then
+		local gearTool = tool:Clone()
+		tagIssued(gearTool, tool.Name)
+		gearTool.Parent = starterGear
 	end
 end
 
@@ -98,54 +137,79 @@ end
 -- ============================================================================
 Players.PlayerAdded:Connect(function(player)
 	player.Chatted:Connect(function(message)
-		local isAdmin = ADMIN_USER_IDS[player.UserId] or (ALLOW_STUDIO_ADMIN and game.PlaceId == 0)
+		local isAdmin = ADMIN_USER_IDS[player.UserId] or IS_STUDIO
 		if not isAdmin then return end
 
 		local args = message:split(" ")
 		local command = args[1]:lower()
 
-		-- [[ 🎒 GIVE COMMAND ]]
 		if command == "/give" then
 			local selector = args[2]
-			local itemName = args[3]
-			local amount = tonumber(args[4]) or 1 
-
-			if not selector or not itemName then return end
+			
+			-- ✅ FIX: Handle Multi-Word Names (e.g. "Delta Item")
+			local itemName = table.concat(args, " ", 3)
+			
+			if not selector or not itemName or itemName == "" then return end
 			local targets = getTargets(player, selector)
 
+			-- 🎁 SPECIAL: /give all
 			if itemName:lower() == "everything" or itemName:lower() == "all" then
+				local toolsToGive = {}
+				for _, child in pairs(CarTools:GetChildren()) do
+					if child:IsA("Tool") then table.insert(toolsToGive, child) end
+				end
+
+				-- Calculate how many UNIQUE IDs we are adding
+				-- (Assume all CarTools are unique relative to each other)
+				local incomingCount = #toolsToGive
+
 				for _, t in pairs(targets) do
-					for _, tool in pairs(CarTools:GetChildren()) do
-						if tool:IsA("Tool") then giveItem(t, tool, 1) end
+					local currentUnique = countUniqueTools(t)
+					if (currentUnique + incomingCount) > MAX_INVENTORY_SIZE then
+						warn("⚠️ BLOCKED: Inventory limit reached for " .. t.Name)
+					else
+						for _, tool in pairs(toolsToGive) do giveItem(t, tool) end
+						print("🎁 Gave EVERYTHING to " .. t.Name)
 					end
-					print("🎁 Gave EVERYTHING to " .. t.Name)
 				end
 				return
 			end
 
+			-- 🎁 NORMAL: /give item
 			local tool = findToolCaseInsensitive(itemName)
 			if tool then
 				for _, t in pairs(targets) do 
-					giveItem(t, tool, amount) 
-					print("✅ Gave " .. tool.Name .. " to " .. t.Name)
+					-- ✅ FIX: Check Cap for single items too
+					-- (Assume if they have it, it won't add to unique count, but let's be safe)
+					local currentUnique = countUniqueTools(t)
+					local newItemId = tool.Name -- The item we are about to give
+					
+					-- Check if they already have this ID (Simulate Set)
+					-- NOTE: countUniqueTools doesn't return the set, so we do a quick check here implies +1
+					-- If accurate cap is critical, we assume worst case: it's a new item.
+					
+					if currentUnique >= MAX_INVENTORY_SIZE then
+						warn("⚠️ BLOCKED: Inventory full for " .. t.Name)
+					else
+						giveItem(t, tool) 
+						print("✅ Gave " .. tool.Name .. " to " .. t.Name)
+					end
 				end
+			else
+				warn("❌ Item not found: " .. itemName)
 			end
 
-		-- [[ ✈️ FLY COMMAND ]]
 		elseif command == "/fly" then
-			local selector = args[2] -- can be empty to fly self
+			local selector = args[2]
 			local targets = getTargets(player, selector)
-			
 			for _, t in pairs(targets) do
 				setFlight(t, true)
 				print("✈️ Flight Enabled: " .. t.Name)
 			end
 
-		-- [[ ⬇️ UNFLY COMMAND ]]
 		elseif command == "/unfly" then
 			local selector = args[2]
 			local targets = getTargets(player, selector)
-			
 			for _, t in pairs(targets) do
 				setFlight(t, false)
 				print("🛑 Flight Disabled: " .. t.Name)
