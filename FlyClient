@@ -1,6 +1,6 @@
--- [[ LOCAL SCRIPT: FlyClient (No GUI Version) ]]
--- FEATURES: Smooth Banking, Modern Physics, ROBUST NO-CLIP.
--- CONTROLS: WASD: Move | SPACE: Up | CTRL: Down | SHIFT: Speed Boost | X: Stop
+-- [[ LOCAL SCRIPT: FlyClient (Fixed & Clean) ]]
+-- FEATURES: Auto-Cleanup, Smooth Banking, Robust No-Clip
+-- FIX: Deleting this script now correctly removes flight physics.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -16,35 +16,40 @@ local humanoid = character:WaitForChild("Humanoid")
 -- ⚙️ SETTINGS
 local SPEED_NORMAL = 100
 local SPEED_BOOST = 150
-local SMOOTHNESS = 0.2 -- Lower is smoother (0.1 - 0.5)
-local BANK_ANGLE = 15 -- How much to tilt when turning
+local SMOOTHNESS = 0.2
+local BANK_ANGLE = 15
 
 -- 🛠️ STATE
 local isFlying = true
 local currentSpeed = SPEED_NORMAL
 local noclipConnection = nil 
+local runtimeFolder = nil -- Holds our physics objects
 
--- 🔗 PHYSICS SETUP (Modern Constraints)
-local attachment = Instance.new("Attachment", rootPart)
+-- 🔗 PHYSICS SETUP
+-- We create a folder so we can destroy EVERYTHING in one go
+runtimeFolder = Instance.new("Folder")
+runtimeFolder.Name = "FlyRuntime"
+runtimeFolder.Parent = rootPart
+
+local attachment = Instance.new("Attachment", runtimeFolder)
 
 local alignPos = Instance.new("LinearVelocity")
 alignPos.Attachment0 = attachment
 alignPos.MaxForce = math.huge
 alignPos.VectorVelocity = Vector3.zero
 alignPos.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-alignPos.Parent = rootPart
+alignPos.Parent = runtimeFolder
 
 local alignRot = Instance.new("AlignOrientation")
 alignRot.Attachment0 = attachment
 alignRot.Mode = Enum.OrientationAlignmentMode.OneAttachment
-alignRot.RigidityEnabled = false -- Smooth rotation
+alignRot.RigidityEnabled = false 
 alignRot.Responsiveness = 20
-alignRot.Parent = rootPart
+alignRot.Parent = runtimeFolder
 
--- 🚫 ANIMATION & ROBUST NO-CLIP
+-- 🚫 ANIMATION & NO-CLIP
 humanoid.PlatformStand = true
 
--- We use 'Stepped' to force CanCollide to false EVERY PHYSICS FRAME.
 noclipConnection = RunService.Stepped:Connect(function()
 	if not character then return end
 	for _, part in pairs(character:GetDescendants()) do
@@ -54,70 +59,86 @@ noclipConnection = RunService.Stepped:Connect(function()
 	end
 end)
 
--- 🛑 STOP FUNCTION
+-- 🛑 STOP FUNCTION (The Fix)
 function stopFlying()
 	if not isFlying then return end
 	isFlying = false
 
-	-- Cleanup Physics
-	if alignPos then alignPos:Destroy() end
-	if alignRot then alignRot:Destroy() end
-	if attachment then attachment:Destroy() end
+	-- 1. Disconnect Loop immediately
+	if noclipConnection then 
+		noclipConnection:Disconnect() 
+		noclipConnection = nil
+	end
 
-	-- Stop Noclip Loop
-	if noclipConnection then noclipConnection:Disconnect() end
+	-- 2. Destroy Physics Folder (Cleans Attachment, Velocity, Orientation at once)
+	if runtimeFolder then 
+		runtimeFolder:Destroy() 
+		runtimeFolder = nil
+	end
 
-	-- Restore Character
-	humanoid.PlatformStand = false
-
-	-- Restore Collision (Safety check so you don't fall through floor)
-	for _, part in pairs(character:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.CanCollide = true
+	-- 3. Restore Character
+	if humanoid and humanoid.Parent then
+		humanoid.PlatformStand = false
+	end
+	
+	-- 4. Restore Collision Safety
+	if character then
+		for _, part in pairs(character:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = true
+			end
 		end
 	end
 
-	-- Kill Script
-	script:Destroy()
+	-- 5. Self-Destruct if not already destroyed
+	if script and script.Parent then
+		script:Destroy()
+	end
 end
 
 -- 🔁 UPDATE LOOP
 local function update(dt)
-	if not isFlying or not character.Parent or not rootPart.Parent then return end
+	if not isFlying or not rootPart.Parent then return end
 
-	-- 1. INPUT HANDLING
 	local controlModule = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
 	local inputMove = controlModule:GetMoveVector()
 
-	-- Vertical Logic (PC/Keyboard)
 	local yAxis = 0
 	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then yAxis = 1 end
 	if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then yAxis = -1 end
 
-	-- Speed Boost (Shift)
 	currentSpeed = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and SPEED_BOOST or SPEED_NORMAL
 
-	-- 2. CALCULATE VELOCITY
 	local camCFrame = camera.CFrame
-	-- Calculate direction relative to camera
 	local moveDir = (camCFrame.RightVector * inputMove.X) + (camCFrame.LookVector * -inputMove.Z)
 	local targetVelocity = (moveDir * currentSpeed) + Vector3.new(0, yAxis * currentSpeed, 0)
 
-	-- 3. APPLY PHYSICS
-	alignPos.VectorVelocity = alignPos.VectorVelocity:Lerp(targetVelocity, SMOOTHNESS)
+	if alignPos and alignPos.Parent then
+		alignPos.VectorVelocity = alignPos.VectorVelocity:Lerp(targetVelocity, SMOOTHNESS)
+	end
 
-	-- 4. ORIENTATION (Banking effect)
-	local tiltZ = -inputMove.X * BANK_ANGLE
-	local targetCFrame = camCFrame * CFrame.Angles(0, 0, math.rad(tiltZ))
-	alignRot.CFrame = targetCFrame
+	if alignRot and alignRot.Parent then
+		local tiltZ = -inputMove.X * BANK_ANGLE
+		local targetCFrame = camCFrame * CFrame.Angles(0, 0, math.rad(tiltZ))
+		alignRot.CFrame = targetCFrame
+	end
 end
 
--- INPUT LISTENER (Toggle/Stop)
+-- 👂 LISTENERS FOR CLEANUP
+-- Case A: Server deletes script
+script.AncestryChanged:Connect(function()
+	if not script.Parent then stopFlying() end
+end)
+
+-- Case B: Server sets attribute
+character:GetAttributeChangedSignal("ForceStopFly"):Connect(function()
+	if character:GetAttribute("ForceStopFly") then stopFlying() end
+end)
+
+-- Case C: User presses X
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
-	if input.KeyCode == Enum.KeyCode.X then
-		stopFlying()
-	end
+	if input.KeyCode == Enum.KeyCode.X then stopFlying() end
 end)
 
 RunService.RenderStepped:Connect(update)
