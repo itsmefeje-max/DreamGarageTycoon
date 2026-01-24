@@ -1,0 +1,66 @@
+-- [[ SERVER SCRIPT: ReceiptRouter ]]
+-- Centralizes MarketplaceService.ProcessReceipt for the entire game.
+
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+-- ⚙️ PRODUCT IDs
+local TABLET_2X_ID = 3509697462 -- Your existing Tablet ID
+local SHOP_REROLL_ID = 0000000 -- ⚠️ REPLACE WITH NEW REROLL PRODUCT ID
+
+-- 🔗 REFERENCES
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
+-- Look for the LocalShopService Bindable
+local ShopServiceScript = game.ServerScriptService:WaitForChild("LocalShopService")
+local ShopRerollFunc = ShopServiceScript:WaitForChild("ShopRerollFunction")
+
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+
+	-- 1. Handle Player Leaving/Crashing
+	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+
+	local pid = receiptInfo.ProductId
+
+	-- ====================================================
+	-- PRODUCT: TABLET 2X EARNINGS
+	-- ====================================================
+	if pid == TABLET_2X_ID then
+		local myPlotName = player:GetAttribute("OccupiedPlot")
+		local plot = TycoonFolder:FindFirstChild(myPlotName or "")
+
+		-- If plot isn't loaded yet, retry later
+		if not plot or not plot:FindFirstChild("PendingEarnings") then 
+			return Enum.ProductPurchaseDecision.NotProcessedYet 
+		end
+
+		local pendingVal = plot.PendingEarnings
+		local amount = pendingVal.Value
+
+		-- Logic: Reset pending, add 2x to cash
+		if amount > 0 then
+			pendingVal.Value = 0
+			local ls = player:FindFirstChild("leaderstats")
+			if ls and ls:FindFirstChild("Cash") then
+				ls.Cash.Value += (amount * 2)
+			end
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		else
+			-- Edge case: 0 earnings, grant anyway to avoid infinite retry loop
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+
+		-- ====================================================
+		-- PRODUCT: SHOP REROLL (49 R$)
+		-- ====================================================
+	elseif pid == SHOP_REROLL_ID then
+		if ShopRerollFunc then
+			ShopRerollFunc:Invoke(player) -- Call LocalShopService
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+	end
+
+	-- Unknown Product
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
