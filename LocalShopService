@@ -1,0 +1,194 @@
+-- [[ SERVER SCRIPT: LocalShopService ]]
+-- Handles per-player stock, limit checks, and secure purchases.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+-- ⚙️ CONFIGURATION
+local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
+local CAR_WEIGHTS = {Delta = 50, Iva = 20, Atom = 15, Windsor = 9, Senator = 5, Riva = 1}
+local RESTOCK_INTERVAL = 300 -- 5 Minutes
+local DEFAULT_LIMIT = 2
+
+-- 📂 REMOTE SETUP
+local Remotes = ReplicatedStorage:FindFirstChild("ShopRemotes")
+if not Remotes then
+	Remotes = Instance.new("Folder")
+	Remotes.Name = "ShopRemotes"
+	Remotes.Parent = ReplicatedStorage
+end
+
+local function getRemote(name, class)
+	local r = Remotes:FindFirstChild(name)
+	if not r then
+		r = Instance.new(class)
+		r.Name = name
+		r.Parent = Remotes
+	end
+	return r
+end
+
+local RemoteOpen = getRemote("OpenLocalShop", "RemoteEvent")
+local RemoteUpdate = getRemote("ShopUpdate", "RemoteEvent")
+local FuncGetState = getRemote("GetShopState", "RemoteFunction")
+local FuncBuyCar = getRemote("BuyLocalCar", "RemoteFunction")
+
+-- 🔗 BINDABLE FOR RECEIPT ROUTER
+local RerollBindable = Instance.new("BindableFunction")
+RerollBindable.Name = "ShopRerollFunction"
+RerollBindable.Parent = script
+
+-- 📂 DATA
+local PlayerSessions = {} 
+
+-- 🛠️ HELPERS
+local function getToolFromStorage(carName)
+	-- Secure lookup: Check exact name, then " Item" suffix
+	local CarTools = ServerStorage:WaitForChild("CarTools", 10)
+	if not CarTools then warn("CRITICAL: CarTools missing") return nil end
+
+	local tool = CarTools:FindFirstChild(carName)
+	if not tool then tool = CarTools:FindFirstChild(carName .. " Item") end
+	return tool
+end
+
+local function getToolCount(player, carName)
+	local count = 0
+	local possibleNames = {carName, carName .. " Item"}
+
+	local function scan(container)
+		if not container then return end
+		for _, item in ipairs(container:GetChildren()) do
+			if table.find(possibleNames, item.Name) then count += 1 end
+		end
+	end
+
+	scan(player.Backpack)
+	scan(player.StarterGear)
+	if player.Character then scan(player.Character) end
+
+	return count
+end
+
+local function generateStock()
+	local r = math.random(1, 100)
+	local targetCount = 1
+	if r > 90 then targetCount = 3 elseif r > 55 then targetCount = 2 end
+
+	local featured = {}
+	local featuredCount = 0
+	local safety = 0
+
+	while featuredCount < targetCount and safety < 50 do
+		safety += 1
+		local totalWeight = 0
+		for _, w in pairs(CAR_WEIGHTS) do totalWeight += w end
+		local roll = math.random(1, totalWeight)
+		local current = 0
+		local picked = nil
+
+		for car, w in pairs(CAR_WEIGHTS) do
+			current += w
+			if roll <= current then picked = car; break end
+		end
+
+		if picked and not featured[picked] then
+			featured[picked] = true
+			featuredCount += 1
+		end
+	end
+
+	if featuredCount == 0 then featured["Delta"] = true end
+	return featured
+end
+
+local function rerollForPlayer(player)
+	local uid = player.UserId
+	PlayerSessions[uid] = {
+		NextRestock = os.time() + RESTOCK_INTERVAL,
+		Featured = generateStock(),
+		Purchased = {} 
+	}
+	RemoteUpdate:FireClient(player, PlayerSessions[uid])
+end
+
+-- 🔄 MAIN LOGIC
+FuncGetState.OnServerInvoke = function(player)
+	if not PlayerSessions[player.UserId] then rerollForPlayer(player) end
+	return PlayerSessions[player.UserId]
+end
+
+FuncBuyCar.OnServerInvoke = function(player, carName)
+	local uid = player.UserId
+	local session = PlayerSessions[uid]
+	if not session then return false, "No Session" end
+
+	local CarStats = require(ReplicatedStorage.CarStats)
+	local carData = CarStats.Cars[carName]
+	if not carData then return false, "Invalid Car ID" end
+
+	-- 1. SHOP STATE CHECKS
+	if not session.Featured[carName] then return false, "Not In Stock" end
+	if session.Purchased[carName] then return false, "Out of Stock" end -- Already bought this roll
+
+	-- 2. LIMIT CHECK
+	local currentCount = getToolCount(player, carName)
+	local limit = player:GetAttribute("LocalCarLimit") or DEFAULT_LIMIT
+
+	if currentCount >= limit then
+		return false, "Limit Reached"
+	end
+
+	-- 3. MONEY CHECK
+	local cash = player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Cash")
+	if not cash or cash.Value < carData.Price then return false, "Insufficient Funds" end
+
+	-- 4. TRANSACTION
+	cash.Value -= carData.Price
+
+	local tool = getToolFromStorage(carName)
+	if tool then
+		local newTool = tool:Clone()
+		newTool:SetAttribute("IssuedByServer", true)
+		newTool:SetAttribute("IssuedAt", os.time())
+		newTool:SetAttribute("ToolId", tool.Name)
+		newTool:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
+
+		newTool.Parent = player.Backpack
+		local gearClone = newTool:Clone()
+		gearClone.Parent = player.StarterGear
+	else
+		warn("⚠️ Tool missing: " .. carName)
+		cash.Value += carData.Price -- Refund
+		return false, "Error: Tool Missing"
+	end
+
+	session.Purchased[carName] = true
+	RemoteUpdate:FireClient(player, session)
+
+	return true, "Success"
+end
+
+-- 🛒 REROLL (Called by ReceiptRouter)
+function RerollBindable.OnInvoke(player)
+	if player then rerollForPlayer(player); return true end
+	return false
+end
+
+-- ⏳ AUTO RESTOCK LOOP
+task.spawn(function()
+	while true do
+		task.wait(1)
+		local now = os.time()
+		for _, player in ipairs(Players:GetPlayers()) do
+			local session = PlayerSessions[player.UserId]
+			if session and now >= session.NextRestock then
+				rerollForPlayer(player)
+			end
+		end
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player) PlayerSessions[player.UserId] = nil end)
