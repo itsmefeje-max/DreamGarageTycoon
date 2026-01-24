@@ -11,7 +11,7 @@ local PlayerGui = player:WaitForChild("PlayerGui")
 local CarStats = require(ReplicatedStorage:WaitForChild("CarStats"))
 
 -- ⚙️ CONFIGURATION
-local REROLL_PRODUCT_ID = 0000000 -- ⚠️ REPLACE with real Reroll DevProduct ID
+local REROLL_PRODUCT_ID = 3520990584 -- ⚠️ REPLACE with real Reroll DevProduct ID
 local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
 local DEFAULT_LIMIT = 2
 
@@ -73,12 +73,12 @@ local function updateDisplay(scrollFrame)
 			local buyBtn = card:FindFirstChild("BuyButton")
 			local robuxBtn = card:FindFirstChild("RobuxButton")
 			local carImage = card:FindFirstChild("CarImage")
-			
+
 			-- [[ ME NOT YOU UPDATE ]]
 			-- The script now ONLY looks for an existing label named "StatusLabel"
 			-- It will NOT create one if it's missing.
 			local statusLabel = card:FindFirstChild("StatusLabel")
-			
+
 			local data = CarStats.Cars[carName]
 
 			-- 1. Update Image
