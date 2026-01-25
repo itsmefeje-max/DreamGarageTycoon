@@ -1,5 +1,6 @@
 -- [[ SERVER SCRIPT: ReceiptRouter ]]
 -- Centralizes MarketplaceService.ProcessReceipt for the entire game.
+-- UPDATED: Fixes Infinite Yield by looking in ServerStorage for Reroll Function.
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
@@ -13,19 +14,20 @@ local SHOP_REROLL_ID = 3520990584 -- ✅ Your Reroll ID
 -- 🚗 CAR PRODUCT IDs (Add these when you create them!)
 -- Format: [Product_ID] = "CarName"
 local CAR_PRODUCT_IDS = {
-	[0000001] = "Delta",   -- ⚠️ REPLACE 0000001 WITH REAL ID
-	[0000002] = "Iva",     -- ⚠️ REPLACE 0000002 WITH REAL ID
-	[0000003] = "Atom",    -- ⚠️ REPLACE 0000003 WITH REAL ID
-	[0000004] = "Windsor", -- ⚠️ REPLACE 0000004 WITH REAL ID
-	[0000005] = "Senator", -- ⚠️ REPLACE 0000005 WITH REAL ID
-	[0000006] = "Riva"     -- ⚠️ REPLACE 0000006 WITH REAL ID
+	[0000000] = "Delta", -- The 5 Robux ID
+	[1111111] = "Iva",
+	[2222222] = "Atom",
+	[3333333] = "Windsor",
+	[4444444] = "Senator",
+	[5555555] = "Riva"
 }
 
 -- 🔗 REFERENCES
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
--- Look for the LocalShopService Bindable
-local ShopServiceScript = game.ServerScriptService:WaitForChild("LocalShopService")
-local ShopRerollFunc = ShopServiceScript:WaitForChild("ShopRerollFunction")
+
+-- ✅ FIX: Look for the function in ServerStorage (Shared Location)
+-- This prevents the "Infinite Yield" error from the previous script.
+local ShopRerollFunc = ServerStorage:WaitForChild("ShopRerollFunction")
 
 MarketplaceService.ProcessReceipt = function(receiptInfo)
 	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
@@ -68,8 +70,11 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		-- ====================================================
 	elseif pid == SHOP_REROLL_ID then
 		if ShopRerollFunc then
-			ShopRerollFunc:Invoke(player) -- Call LocalShopService
+			ShopRerollFunc:Invoke(player) -- Call LocalShopService via ServerStorage
 			return Enum.ProductPurchaseDecision.PurchaseGranted
+		else
+			warn("⚠️ Critical: ShopRerollFunction missing in ServerStorage!")
+			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 
 		-- ====================================================
