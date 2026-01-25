@@ -1,5 +1,5 @@
 -- [[ LOCAL SCRIPT: LocalShopController ]]
--- UPDATED: Forces UI to hide on join. Only opens via NPC.
+-- UPDATED: Unlimited Purchases + SFX for Restock/Reroll + Dim Effect on Robux.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,17 +7,24 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
+
+-- 🛑 IMMEDIATE HIDE
+local gui = PlayerGui:WaitForChild("LocalShopUI")
+local mainFrame = gui:WaitForChild("MainFrame")
+mainFrame.Visible = true 
+gui.Enabled = false 
+
 local CarStats = require(ReplicatedStorage:WaitForChild("CarStats"))
 local Kit = require(ReplicatedStorage:WaitForChild("ShopFrontendKit"))
 
 -- ⚙️ CONFIGURATION
 local REROLL_PRODUCT_ID = 3520990584 
 local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
-local DEFAULT_LIMIT = 2
+local DEFAULT_LIMIT = 999999 -- ✅ UPDATED: Effectively unlimited
 
 local ROBUX_PRODUCTS = {
-	Delta = 0000001, Iva = 0000002, Atom = 0000003, 
-	Windsor = 0000004, Senator = 0000005, Riva = 0000006
+	Delta = 0000000, Iva = 1111111, Atom = 2222222, 
+	Windsor = 3333333, Senator = 4444444, Riva = 5555555
 }
 
 -- 📡 REMOTES
@@ -30,59 +37,72 @@ local FuncBuyCar = Remotes:WaitForChild("BuyLocalCar")
 -- 🛡️ STATE
 local currentState = nil
 local purchaseDebounce = {} 
+local isProcessingPurchase = false -- Prevents Restock SFX when buying a car
 
 -- 🛑 UI REFERENCES
 local function getUI()
-	local gui = PlayerGui:WaitForChild("LocalShopUI")
-	local mainFrame = gui:WaitForChild("MainFrame")
-	return gui, mainFrame, mainFrame:WaitForChild("ScrollingFrame"), mainFrame:WaitForChild("TimerLabel"), mainFrame:WaitForChild("RerollButton"), mainFrame:WaitForChild("CloseButton")
+	return gui, mainFrame, mainFrame:WaitForChild("ScrollingFrame"), mainFrame:WaitForChild("TimerLabel"), 
+	mainFrame:WaitForChild("RerollButton"), mainFrame:WaitForChild("CloseButton")
 end
 
 -- ============================================================================
 -- 🧠 RENDER LOGIC
 -- ============================================================================
 local function RenderCard(card, carName, state)
-	local buyBtn = card:FindFirstChild("BuyButton")
-	local robuxBtn = card:FindFirstChild("RobuxButton")
 	local carImage = card:FindFirstChild("CarImage")
 	local statusLabel = card:FindFirstChild("StatusLabel")
+	
+	-- DIRECT BUTTON ACCESS
+	local buyBtn = card:FindFirstChild("BuyButton")
+	local robuxBtn = card:FindFirstChild("RobuxButton")
 
 	if carImage and state.Image then carImage.Image = state.Image end
-
 	if statusLabel then
 		statusLabel.Visible = true
 		statusLabel.Text = state.StatusText
 		statusLabel.TextColor3 = state.StatusColor
 	end
 
+	-- 1. CASH BUTTON
 	if buyBtn then
-		if state.IsPurchasing then
-			buyBtn.Text = "..."
-			buyBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-			buyBtn.Active = false
-		elseif not state.CanBuy then
-			buyBtn.Text = state.BuyText
-			buyBtn.BackgroundColor3 = state.BuyColor
-			buyBtn.Active = false
-		else
-			buyBtn.Text = "$" .. state.Price
-			buyBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-			buyBtn.Active = true
+		if buyBtn:IsA("TextButton") then
+			if state.IsPurchasing then
+				buyBtn.Text = "..."
+				buyBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			elseif not state.CanBuy then
+				buyBtn.Text = state.BuyText
+				buyBtn.BackgroundColor3 = state.BuyColor
+			else
+				buyBtn.Text = "$" .. state.Price
+				buyBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+			end
 		end
+		
+		if buyBtn:IsA("ImageButton") then
+			if not state.CanBuy then
+				buyBtn.ImageColor3 = Color3.fromRGB(150, 150, 150)
+			else
+				buyBtn.ImageColor3 = Color3.new(1,1,1)
+			end
+		end
+		
+		buyBtn.Active = state.CanBuy or state.IsPurchasing
 	end
 
-	if robuxBtn then robuxBtn.Visible = state.CanRobux end
+	-- 2. ROBUX BUTTON
+	if robuxBtn then 
+		robuxBtn.Visible = state.CanRobux 
+	end
 end
 
 local function UpdateDisplay(scrollFrame)
 	if not currentState then return end
-	local limit = player:GetAttribute("LocalCarLimit") or DEFAULT_LIMIT
-
+	-- Removed the "Limit" attribute check completely
+	
 	for _, carName in ipairs(SHOP_CARS) do
 		local card = scrollFrame:FindFirstChild(carName)
 		if card then
 			local data = CarStats.Cars[carName]
-			local myCount = Kit.Inventory:GetCount(carName)
 			local isFeatured = currentState.Featured[carName]
 			local isBought = currentState.Purchased[carName]
 			local isPurchasing = purchaseDebounce[carName]
@@ -107,33 +127,27 @@ local function UpdateDisplay(scrollFrame)
 			else
 				vm.StatusText = "ON STOCK"
 				vm.StatusColor = Color3.fromRGB(80, 255, 120)
-				if myCount >= limit then
-					vm.BuyText = "Limit Reached"
-					vm.BuyColor = Color3.fromRGB(150, 0, 0)
-					vm.CanRobux = false
-				else
-					vm.CanBuy = true
-				end
+				
+				-- ✅ LIMIT REMOVED: Always allow buy if in stock
+				vm.CanBuy = true 
 			end
 			RenderCard(card, carName, vm)
 		end
 	end
 end
 
--- ============================================================================
--- 🛒 ACTIONS
--- ============================================================================
 local function AttemptBuy(carName, scrollFrame)
 	if purchaseDebounce[carName] then return end
-	
+
 	purchaseDebounce[carName] = true
+	isProcessingPurchase = true -- Lock SFX
 	UpdateDisplay(scrollFrame)
-	Kit.Sound:Play("Click")
 	
 	task.spawn(function()
 		local success, msg = FuncBuyCar:InvokeServer(carName)
 		purchaseDebounce[carName] = false
-		
+		isProcessingPurchase = false -- Unlock SFX
+
 		if success then
 			Kit.Sound:Play("BuySuccess")
 		else
@@ -151,13 +165,10 @@ end
 -- ============================================================================
 local function init()
 	local gui, mainFrame, scrollFrame, timerLabel, rerollBtn, closeBtn = getUI()
-	
-	-- ✅ FIX: Force the UI to hide immediately when the player joins
 	gui.Enabled = false 
-	
 	Kit.Inventory:Init(SHOP_CARS)
 
-	-- 1. Setup Main Buttons
+	-- 1. Setup Global Buttons
 	Kit.Tween:SetupButton(rerollBtn, function()
 		MarketplaceService:PromptProductPurchase(player, REROLL_PRODUCT_ID)
 	end)
@@ -166,17 +177,18 @@ local function init()
 		gui.Enabled = false
 	end)
 
-	-- 2. Setup Cards
+	-- 2. Setup Cards (Buttons)
 	for _, carName in ipairs(SHOP_CARS) do
 		local card = scrollFrame:WaitForChild(carName, 5)
 		if card then
 			local buyBtn = card:FindFirstChild("BuyButton")
 			if buyBtn then
-				buyBtn.MouseButton1Click:Connect(function()
+				Kit.Tween:SetupButton(buyBtn, function()
 					if buyBtn.Active then AttemptBuy(carName, scrollFrame) end
 				end)
 			end
-			
+
+			-- ✅ ROBUX BUTTON DIMMING ENABLED HERE
 			local robuxBtn = card:FindFirstChild("RobuxButton")
 			if robuxBtn then
 				Kit.Tween:SetupButton(robuxBtn, function()
@@ -187,26 +199,14 @@ local function init()
 		end
 	end
 
-	-- 3. Timer & Restock
-	local isSyncing = false
+	-- 3. Timer (Visual Only)
 	task.spawn(function()
 		while true do
 			task.wait(1)
-			if gui.Enabled and currentState then
-				local left = math.max(0, currentState.NextRestock - os.time())
-				timerLabel.Text = string.format("Restock: %02d:%02d", math.floor(left/60), left%60)
-
-				if left == 0 and not isSyncing then
-					isSyncing = true
-					Kit.Sound:Play("Restock")
-					Kit.Toast:Show("SHOP RESTOCKED!", Color3.fromRGB(255, 255, 0))
-					
-					task.delay(1, function() 
-						currentState = FuncGetState:InvokeServer()
-						UpdateDisplay(scrollFrame)
-						isSyncing = false
-					end)
-				end
+			if gui.Enabled then
+				local now = os.time()
+				local secondsLeft = 300 - (now % 300)
+				timerLabel.Text = string.format("New Cars will restock at : %02d:%02d", math.floor(secondsLeft/60), secondsLeft%60)
 			end
 		end
 	end)
@@ -214,14 +214,23 @@ local function init()
 	-- 4. Remotes
 	RemoteOpen.OnClientEvent:Connect(function()
 		Kit.Sound:Play("Open")
-		gui.Enabled = true -- ✅ This only turns True when the server fires the event (NPC interaction)
+		gui.Enabled = true 
 		currentState = FuncGetState:InvokeServer()
 		UpdateDisplay(scrollFrame)
 	end)
 
+	-- ✅ SOUND LOGIC FOR RESTOCK / REROLL
+	-- This fires when:
+	-- 1. Timer hits 0 (Global Restock) -> Plays Sound
+	-- 2. You buy a Reroll (Manual Restock) -> Plays Sound
+	-- 3. You buy a Car -> Sound Blocked by isProcessingPurchase
 	RemoteUpdate.OnClientEvent:Connect(function(newState)
 		currentState = newState
 		UpdateDisplay(scrollFrame)
+		
+		if not isProcessingPurchase then
+			Kit.Sound:Play("Restock") 
+		end
 	end)
 end
 
