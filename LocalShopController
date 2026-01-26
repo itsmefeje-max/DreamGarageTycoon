@@ -1,5 +1,5 @@
 -- [[ LOCAL SCRIPT: LocalShopController ]]
--- UPDATED: Fixed Robux Button visibility (Always shows for Delta/Configured Cars)
+-- UPDATED: Reverted to simple "No Stock" text logic (Removes "Out of Rotation")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -22,12 +22,12 @@ local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
 
 -- 🔴 IMPORTANT: REPLACE THESE NUMBERS WITH YOUR REAL DEVELOPER PRODUCT IDS
 local ROBUX_PRODUCTS = {
-	Delta   = 0000000, -- Replace with REAL ID (Button will now show even if this is 0)
-	Iva     = 1111111, -- Replace with REAL ID
-	Atom    = 2222222, -- Replace with REAL ID
-	Windsor = 3333333, -- Replace with REAL ID
-	Senator = 4444444, -- Replace with REAL ID
-	Riva    = 5555555  -- Replace with REAL ID
+	Delta   = 0000000, 
+	Iva     = 1111111, 
+	Atom    = 2222222, 
+	Windsor = 3333333, 
+	Senator = 4444444, 
+	Riva    = 5555555  
 }
 
 -- 📡 REMOTES
@@ -56,35 +56,32 @@ local function RenderCard(card, carName, state)
 	local stockLabel = card:FindFirstChild("StockInformation") 
 	local buyBtn = card:FindFirstChild("BuyButton")
 	local robuxBtn = card:FindFirstChild("RobuxButton") 
-	
-	-- 🆕 NEW: Find the NoStockIndicator
 	local noStockInd = card:FindFirstChild("NoStockIndicator")
 
 	if carImage and state.Image then carImage.Image = state.Image end
 
-	-- ✅ STOCK TEXT LOGIC
+	-- ✅ RESTORED SIMPLE STOCK TEXT LOGIC
 	if stockLabel then
 		stockLabel.Visible = true
-		if state.StockAmount and state.StockAmount > 0 then
+
+		-- Logic: If you can buy it -> "On Stock"
+		-- If you CANNOT buy it (Empty OR Not Featured) -> "No Stock"
+		if state.CanBuy then
 			stockLabel.Text = "On Stock x " .. state.StockAmount
 			stockLabel.TextColor3 = Color3.fromRGB(85, 255, 127) -- Green
 		else
-			stockLabel.Text = "No Stock"
+			stockLabel.Text = "No Stock" -- Simpler, like the old script
 			stockLabel.TextColor3 = Color3.fromRGB(255, 80, 80) -- Red
 		end
 	end
 
-	-- 1. CASH BUTTON & NO STOCK INDICATOR LOGIC
+	-- 1. CASH BUTTON LOGIC
 	if buyBtn then
 		buyBtn.ZIndex = 20 
-		
 		if state.CanBuy then
-			-- ✅ CASE: IN STOCK
-			buyBtn.Visible = true
-			buyBtn.Active = true
-			if noStockInd then noStockInd.Visible = false end -- Hide Indicator
+			buyBtn.Visible = true; buyBtn.Active = true
+			if noStockInd then noStockInd.Visible = false end 
 
-			-- Update Button Visuals
 			if buyBtn:IsA("TextButton") then
 				if state.IsPurchasing then
 					buyBtn.Text = "..."
@@ -94,23 +91,19 @@ local function RenderCard(card, carName, state)
 					buyBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
 				end
 			end
-			if buyBtn:IsA("ImageButton") then
-				buyBtn.ImageColor3 = Color3.new(1,1,1)
-			end
-			
+			if buyBtn:IsA("ImageButton") then buyBtn.ImageColor3 = Color3.new(1,1,1) end
 		else
-			-- ❌ CASE: OUT OF STOCK
-			buyBtn.Visible = false -- Hide Button
-			buyBtn.Active = false
-			if noStockInd then noStockInd.Visible = true end -- Show Indicator
+			buyBtn.Visible = false; buyBtn.Active = false
+
+			-- ✅ Show Indicator whenever we can't buy (covers both Empty and Not in Rotation)
+			if noStockInd then noStockInd.Visible = true end 
 		end
 	end
 
-	-- 2. ROBUX BUTTON (Always Visible if Configured)
+	-- 2. ROBUX BUTTON LOGIC
 	if robuxBtn then 
-		-- We force visibility if CanRobux is true (which is now always true if in list)
 		robuxBtn.Visible = state.CanRobux 
-		robuxBtn.ZIndex = 25 -- [FIX] Increased ZIndex to ensure it sits above everything
+		robuxBtn.ZIndex = 25 
 		robuxBtn.Active = true 
 	end
 end
@@ -122,7 +115,9 @@ local function UpdateDisplay(scrollFrame)
 		local card = scrollFrame:FindFirstChild(carName)
 		if card then
 			local data = CarStats.Cars[carName]
-			local isFeatured = currentState.Featured[carName] 
+
+			-- READ SERVER DATA
+			local isFeatured = currentState.Featured[carName] == true
 			local currentStock = currentState.Stock and currentState.Stock[carName] or 0
 			local isPurchasing = purchaseDebounce[carName]
 
@@ -130,28 +125,22 @@ local function UpdateDisplay(scrollFrame)
 				Image = data.Image,
 				Price = data.Price,
 				IsPurchasing = isPurchasing,
+				IsFeatured = isFeatured,
 				StockAmount = currentStock,
 				CanBuy = false,
 				CanRobux = false
 			}
 
-			-- 1. Cash Buying Logic (Depends on Stock)
-			if isFeatured then
-				vm.CanBuy = (currentStock > 0)
-				vm.StockAmount = currentStock
+			-- 1. Cash Buying (Must be Featured AND Have Stock)
+			if isFeatured and currentStock > 0 then
+				vm.CanBuy = true
 			else
 				vm.CanBuy = false
-				vm.StockAmount = 0
 			end
 
-			-- 2. Robux Buying Logic (FIXED: Always Available if in list)
-			-- We removed the "> 0" check so the button appears even for placeholders
-			if ROBUX_PRODUCTS[carName] then
-				vm.CanRobux = true 
-			else
-				vm.CanRobux = false
-			end
-			
+			-- 2. Robux Buying (Always Available if Configured)
+			if ROBUX_PRODUCTS[carName] then vm.CanRobux = true else vm.CanRobux = false end
+
 			RenderCard(card, carName, vm)
 		end
 	end
@@ -192,14 +181,11 @@ local function init()
 		MarketplaceService:PromptProductPurchase(player, REROLL_PRODUCT_ID)
 	end)
 
-	Kit.Tween:SetupButton(closeBtn, function()
-		gui.Enabled = false
-	end)
+	Kit.Tween:SetupButton(closeBtn, function() gui.Enabled = false end)
 
 	for _, carName in ipairs(SHOP_CARS) do
 		local card = scrollFrame:WaitForChild(carName, 5)
 		if card then
-			-- SETUP CASH BUY BUTTON
 			local buyBtn = card:FindFirstChild("BuyButton")
 			if buyBtn then
 				Kit.Tween:SetupButton(buyBtn, function()
@@ -207,7 +193,6 @@ local function init()
 				end)
 			end
 
-			-- SETUP ROBUX BUTTON
 			local robuxBtn = card:FindFirstChild("RobuxButton")
 			if robuxBtn then
 				Kit.Tween:SetupButton(robuxBtn, function()
@@ -215,8 +200,7 @@ local function init()
 					if pid and pid > 0 then 
 						MarketplaceService:PromptProductPurchase(player, pid) 
 					else
-						-- [WARN] Helpful print for you if you forget to set the ID
-						warn("⚠️ You clicked the Robux Button for " .. carName .. " but the ID is 0! Please update ROBUX_PRODUCTS in LocalShopController.")
+						warn("⚠️ Robux ID is 0 for " .. carName)
 					end
 				end)
 			end
