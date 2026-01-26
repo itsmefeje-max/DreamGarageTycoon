@@ -1,5 +1,5 @@
 -- [[ SERVER SCRIPT: LocalShopService ]]
--- UPDATED: Finite 1-3 Stock Generation.
+-- UPDATED: Rarity-Based Stock, Optimized Rotation, Boolean Featured Flags
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
@@ -7,6 +7,7 @@ local HttpService = game:GetService("HttpService")
 
 -- ⚙️ CONFIGURATION
 local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
+-- Weights act as "Rarity %" (Delta = 50% chance to have extra stock)
 local CAR_WEIGHTS = {Delta = 50, Iva = 20, Atom = 15, Windsor = 9, Senator = 5, Riva = 1}
 local ALWAYS_STOCK = {["Delta"] = true, ["Iva"] = true} 
 local RESTOCK_INTERVAL = 300 
@@ -40,88 +41,157 @@ local PlayerSessions = {}
 -- LOGIC
 local function getGlobalSeedID() return math.floor(os.time() / RESTOCK_INTERVAL) end
 
--- ✅ GENERATE 1-3 STOCK
-local function generateStockConfiguration(seedValue)
-	local rng = Random.new(seedValue)
-	local stockConfig = {} 
+-- ✅ NEW: RARITY-BASED STOCK CALCULATOR
+local function calculateStockForCar(carName, rng)
+	local weight = CAR_WEIGHTS[carName] or 0
+	local limit = 1 -- Base stock
 
-	-- 1. Always Stock (1-3)
-	for name, _ in pairs(ALWAYS_STOCK) do
-		stockConfig[name] = rng:NextInteger(1, 3) 
-	end
+	-- Roll 1: Chance to get +1 (Based on Rarity %)
+	if rng:NextInteger(1, 100) <= weight then
+		limit = limit + 1
 
-	-- 2. Featured Rotation (1-3)
-	local r = rng:NextInteger(1, 100)
-	local targetCount = (r > 90 and 3) or (r > 55 and 2) or 1
-	local pickedCount, safety = 0, 0
-
-	while pickedCount < targetCount and safety < 50 do
-		safety += 1
-		local totalWeight = 0; for _, w in pairs(CAR_WEIGHTS) do totalWeight += w end
-		local roll = rng:NextInteger(1, totalWeight)
-		local current = 0; local picked = nil
-
-		for car, w in pairs(CAR_WEIGHTS) do 
-			current += w; if roll <= current then picked = car; break end 
-		end
-
-		if picked and not stockConfig[picked] then 
-			stockConfig[picked] = rng:NextInteger(1, 3)
-			pickedCount += 1 
+		-- Roll 2: Small chance to get +1 again (Cap at 3)
+		-- We use half the weight for the "crit" roll
+		if limit == 2 and rng:NextInteger(1, 100) <= math.ceil(weight * 0.5) then
+			limit = limit + 1
 		end
 	end
 
-	return stockConfig
+	return limit
 end
 
-local function calculateRemainingStock(stockConfig, purchasedCounts)
-	local currentStock = {}
-	for carName, initialLimit in pairs(stockConfig) do
-		local boughtAmount = purchasedCounts[carName] or 0
-		local remaining = initialLimit - boughtAmount
-		if remaining < 0 then remaining = 0 end
-		currentStock[carName] = remaining
+-- ✅ UPDATED: CONFIG GENERATION
+local function generateStockConfiguration(seedValue)
+	local rng = Random.new(seedValue)
+
+	local featuredFlags = {} -- {CarName = true}
+	local stockLimits = {}   -- {CarName = MaxAmount}
+
+	-- 1. Process ALWAYS_STOCK (Force Featured, Calc Stock)
+	for name, _ in pairs(ALWAYS_STOCK) do
+		featuredFlags[name] = true
+		stockLimits[name] = calculateStockForCar(name, rng)
 	end
-	return currentStock
+
+	-- 2. Build Weighted Pool (Excluding Always Stock)
+	local poolKeys = {}
+	local poolWeights = {}
+	local totalWeight = 0
+
+	for name, weight in pairs(CAR_WEIGHTS) do
+		if not ALWAYS_STOCK[name] then
+			table.insert(poolKeys, name)
+			totalWeight = totalWeight + weight
+			poolWeights[name] = weight
+		end
+	end
+
+	-- 3. Rotation Logic (Rotation Size)
+	local r = rng:NextInteger(1, 100)
+	local targetCount = (r > 90 and 3) or (r > 55 and 2) or 1
+
+	local pickedCount = 0
+	local safety = 0
+
+	while pickedCount < targetCount and safety < 50 do
+		safety = safety + 1
+		local roll = rng:NextInteger(1, totalWeight)
+		local current = 0
+		local picked = nil
+
+		for _, car in ipairs(poolKeys) do
+			local w = poolWeights[car]
+			current = current + w
+			if roll <= current then
+				picked = car
+				break
+			end
+		end
+
+		if picked and not featuredFlags[picked] then
+			featuredFlags[picked] = true
+			stockLimits[picked] = calculateStockForCar(picked, rng)
+			pickedCount = pickedCount + 1
+		end
+	end
+
+	return {
+		Featured = featuredFlags, 
+		Limits = stockLimits
+	}
+end
+
+-- ✅ NEW: Calculate Remaining Stock based on Limit vs Purchased
+local function calculateCurrentStock(limits, purchasedCounts)
+	local current = {}
+	for car, limit in pairs(limits) do
+		local bought = purchasedCounts[car] or 0
+		local left = limit - bought
+		if left < 0 then left = 0 end
+		current[car] = left
+	end
+	return current
 end
 
 local function validateSession(player)
-	local uid = player.UserId; local currentGlobalID = getGlobalSeedID()
+	local uid = player.UserId
+	local currentGlobalID = getGlobalSeedID()
+
 	if not PlayerSessions[uid] then 
-		PlayerSessions[uid] = {SeedVersion = currentGlobalID, LocalSeed = nil, Purchased = {}} 
+		PlayerSessions[uid] = {
+			SeedVersion = currentGlobalID, 
+			LocalSeed = nil, 
+			Purchased = {},
+			Cache = nil -- ✅ Cache container
+		} 
 	end
+
 	local session = PlayerSessions[uid]
 
+	-- RESET IF NEW ROTATION
 	if session.SeedVersion ~= currentGlobalID then
 		session.SeedVersion = currentGlobalID
 		session.LocalSeed = nil
 		session.Purchased = {} 
+		session.Cache = nil -- Clear cache on rotate
 
-		local stockConfig = generateStockConfiguration(currentGlobalID)
-		local currentStock = calculateRemainingStock(stockConfig, session.Purchased)
+		-- Generate new state
+		local seed = session.LocalSeed or session.SeedVersion
+		session.Cache = generateStockConfiguration(seed)
+		local currentStock = calculateCurrentStock(session.Cache.Limits, session.Purchased)
 
 		RemoteUpdate:FireClient(player, {
-			Featured = stockConfig,
-			Purchased = session.Purchased,
+			Featured = session.Cache.Featured,
+			StockLimit = session.Cache.Limits,
 			Stock = currentStock,
+			Purchased = session.Purchased,
 			NextRestock = (currentGlobalID + 1) * RESTOCK_INTERVAL, 
 			IsGlobal = true,
 			Reason = "Auto"
 		})
 	end
+
+	-- Generate Cache if missing (First Load)
+	if not session.Cache then
+		local seed = session.LocalSeed or session.SeedVersion
+		session.Cache = generateStockConfiguration(seed)
+	end
+
 	return session
 end
 
 FuncGetState.OnServerInvoke = function(player)
 	local session = validateSession(player)
-	local seed = session.LocalSeed or session.SeedVersion
-	local stockConfig = generateStockConfiguration(seed)
-	local currentStock = calculateRemainingStock(stockConfig, session.Purchased)
+
+	-- Use Cached Config
+	local config = session.Cache
+	local currentStock = calculateCurrentStock(config.Limits, session.Purchased)
 
 	return {
-		Featured = stockConfig,
+		Featured = config.Featured,     -- {Delta = true}
+		StockLimit = config.Limits,     -- {Delta = 3}
+		Stock = currentStock,           -- {Delta = 2}
 		Purchased = session.Purchased,
-		Stock = currentStock,
 		NextRestock = (getGlobalSeedID() + 1) * RESTOCK_INTERVAL,
 		IsGlobal = (session.LocalSeed == nil)
 	}
@@ -129,16 +199,16 @@ end
 
 FuncBuyCar.OnServerInvoke = function(player, carName)
 	local session = validateSession(player)
-	local seed = session.LocalSeed or session.SeedVersion
-	local stockConfig = generateStockConfiguration(seed)
+	local config = session.Cache -- Use Cache
 
-	local CarStats = require(ReplicatedStorage.CarStats); local carData = CarStats.Cars[carName]
+	local CarStats = require(ReplicatedStorage.CarStats)
+	local carData = CarStats.Cars[carName]
 
 	if not carData then return false, "Invalid Car" end
-	if not stockConfig[carName] then return false, "Not In Rotation" end
+	if not config.Featured[carName] then return false, "Not In Rotation" end
 
 	local boughtAmount = session.Purchased[carName] or 0
-	local maxLimit = stockConfig[carName]
+	local maxLimit = config.Limits[carName]
 
 	if boughtAmount >= maxLimit then
 		return false, "Out of Stock"
@@ -147,21 +217,33 @@ FuncBuyCar.OnServerInvoke = function(player, carName)
 	local cash = player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Cash")
 	if not cash or cash.Value < carData.Price then return false, "Insufficient Funds" end
 
-	cash.Value -= carData.Price
-	local tool = ServerStorage:FindFirstChild("CarTools") and ServerStorage.CarTools:FindFirstChild(carName) or ServerStorage.CarTools:FindFirstChild(carName.." Item")
-	if tool then
-		tool:Clone().Parent = player.Backpack; tool:Clone().Parent = player.StarterGear
+	-- Transaction
+	cash.Value = cash.Value - carData.Price
+
+	-- ✅ FIXED: Proper Cloning
+	local toolSource = ServerStorage:FindFirstChild("CarTools") and (ServerStorage.CarTools:FindFirstChild(carName) or ServerStorage.CarTools:FindFirstChild(carName.." Item"))
+
+	if toolSource then
+		local backpackTool = toolSource:Clone()
+		backpackTool.Parent = player.Backpack
+
+		local gearTool = toolSource:Clone()
+		gearTool.Parent = player.StarterGear
 	else
-		cash.Value += carData.Price; return false, "Tool Missing"
+		cash.Value = cash.Value + carData.Price -- Refund
+		return false, "Tool Missing"
 	end
 
 	session.Purchased[carName] = boughtAmount + 1
-	local currentStock = calculateRemainingStock(stockConfig, session.Purchased)
+
+	-- Update Client
+	local currentStock = calculateCurrentStock(config.Limits, session.Purchased)
 
 	RemoteUpdate:FireClient(player, {
-		Featured = stockConfig, 
-		Purchased = session.Purchased,
+		Featured = config.Featured, 
+		StockLimit = config.Limits,
 		Stock = currentStock,
+		Purchased = session.Purchased,
 		NextRestock = (getGlobalSeedID() + 1) * RESTOCK_INTERVAL, 
 		IsGlobal = (session.LocalSeed == nil),
 		Reason = "Purchase"
@@ -172,16 +254,19 @@ end
 function RerollBindable.OnInvoke(player)
 	if not player then return false end
 	local session = validateSession(player)
+
 	session.LocalSeed = math.random(1, 999999999)
 	session.Purchased = {} 
 
-	local stockConfig = generateStockConfiguration(session.LocalSeed)
-	local currentStock = calculateRemainingStock(stockConfig, session.Purchased)
+	-- Regenerate & Cache
+	session.Cache = generateStockConfiguration(session.LocalSeed)
+	local currentStock = calculateCurrentStock(session.Cache.Limits, session.Purchased)
 
 	RemoteUpdate:FireClient(player, {
-		Featured = stockConfig,
-		Purchased = session.Purchased,
+		Featured = session.Cache.Featured,
+		StockLimit = session.Cache.Limits,
 		Stock = currentStock,
+		Purchased = session.Purchased,
 		NextRestock = (getGlobalSeedID() + 1) * RESTOCK_INTERVAL,
 		IsGlobal = false,
 		Reason = "Reroll"
