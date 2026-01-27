@@ -1,5 +1,7 @@
 -- [[ SERVER SCRIPT: LocalShopService ]]
 -- UPDATED: Rarity-Based Stock, Optimized Rotation, Boolean Featured Flags
+-- FIXED: Added Security Tags (IssuedByServer) to prevent TycoonDataHandler deletion.
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
@@ -38,7 +40,23 @@ end
 -- 📂 DATA
 local PlayerSessions = {} 
 
--- LOGIC
+-- ============================================================================
+-- 🛡️ SECURITY HELPER (THE FIX)
+-- ============================================================================
+-- This applies the "Receipt" so TycoonDataHandler doesn't delete the car.
+local function tagIssued(tool, originalName)
+	if not tool then return end
+	tool:SetAttribute("IssuedByServer", true)
+	tool:SetAttribute("IssuedAt", os.time())
+	tool:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
+	tool:SetAttribute("ToolId", originalName) -- Crucial for Data Saving
+	tool.CanBeDropped = false
+end
+
+-- ============================================================================
+-- 🧠 SHOP LOGIC
+-- ============================================================================
+
 local function getGlobalSeedID() return math.floor(os.time() / RESTOCK_INTERVAL) end
 
 -- ✅ NEW: RARITY-BASED STOCK CALCULATOR
@@ -220,14 +238,18 @@ FuncBuyCar.OnServerInvoke = function(player, carName)
 	-- Transaction
 	cash.Value = cash.Value - carData.Price
 
-	-- ✅ FIXED: Proper Cloning
+	-- ✅ FIXED: Proper Cloning & Tagging
 	local toolSource = ServerStorage:FindFirstChild("CarTools") and (ServerStorage.CarTools:FindFirstChild(carName) or ServerStorage.CarTools:FindFirstChild(carName.." Item"))
 
 	if toolSource then
+		-- 1. Create Backpack Copy
 		local backpackTool = toolSource:Clone()
+		tagIssued(backpackTool, toolSource.Name) -- 🛡️ Apply Security Tag
 		backpackTool.Parent = player.Backpack
 
+		-- 2. Create StarterGear Copy
 		local gearTool = toolSource:Clone()
+		tagIssued(gearTool, toolSource.Name) -- 🛡️ Apply Security Tag
 		gearTool.Parent = player.StarterGear
 	else
 		cash.Value = cash.Value + carData.Price -- Refund
