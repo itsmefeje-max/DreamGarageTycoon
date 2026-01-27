@@ -1,5 +1,5 @@
 -- [[ LOCAL SCRIPT: LocalShopController ]]
--- UPDATED: Reverted to simple "No Stock" text logic (Removes "Out of Rotation")
+-- UPDATED: Fixed Overlay Issue (Forces Clipping & ZIndex)
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -20,7 +20,7 @@ local Kit = require(ReplicatedStorage:WaitForChild("ShopFrontendKit"))
 local REROLL_PRODUCT_ID = 3520990584 
 local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
 
--- 🔴 IMPORTANT: REPLACE THESE NUMBERS WITH YOUR REAL DEVELOPER PRODUCT IDS
+-- 🔴 ROBUX IDS
 local ROBUX_PRODUCTS = {
 	Delta   = 0000000, 
 	Iva     = 1111111, 
@@ -60,22 +60,19 @@ local function RenderCard(card, carName, state)
 
 	if carImage and state.Image then carImage.Image = state.Image end
 
-	-- ✅ RESTORED SIMPLE STOCK TEXT LOGIC
+	-- ✅ STOCK TEXT
 	if stockLabel then
 		stockLabel.Visible = true
-
-		-- Logic: If you can buy it -> "On Stock"
-		-- If you CANNOT buy it (Empty OR Not Featured) -> "No Stock"
 		if state.CanBuy then
 			stockLabel.Text = "On Stock x " .. state.StockAmount
-			stockLabel.TextColor3 = Color3.fromRGB(85, 255, 127) -- Green
+			stockLabel.TextColor3 = Color3.fromRGB(85, 255, 127) 
 		else
-			stockLabel.Text = "No Stock" -- Simpler, like the old script
-			stockLabel.TextColor3 = Color3.fromRGB(255, 80, 80) -- Red
+			stockLabel.Text = "No Stock"
+			stockLabel.TextColor3 = Color3.fromRGB(255, 80, 80) 
 		end
 	end
 
-	-- 1. CASH BUTTON LOGIC
+	-- 1. CASH BUTTON
 	if buyBtn then
 		buyBtn.ZIndex = 20 
 		if state.CanBuy then
@@ -94,13 +91,11 @@ local function RenderCard(card, carName, state)
 			if buyBtn:IsA("ImageButton") then buyBtn.ImageColor3 = Color3.new(1,1,1) end
 		else
 			buyBtn.Visible = false; buyBtn.Active = false
-
-			-- ✅ Show Indicator whenever we can't buy (covers both Empty and Not in Rotation)
 			if noStockInd then noStockInd.Visible = true end 
 		end
 	end
 
-	-- 2. ROBUX BUTTON LOGIC
+	-- 2. ROBUX BUTTON
 	if robuxBtn then 
 		robuxBtn.Visible = state.CanRobux 
 		robuxBtn.ZIndex = 25 
@@ -115,8 +110,6 @@ local function UpdateDisplay(scrollFrame)
 		local card = scrollFrame:FindFirstChild(carName)
 		if card then
 			local data = CarStats.Cars[carName]
-
-			-- READ SERVER DATA
 			local isFeatured = currentState.Featured[carName] == true
 			local currentStock = currentState.Stock and currentState.Stock[carName] or 0
 			local isPurchasing = purchaseDebounce[carName]
@@ -127,20 +120,9 @@ local function UpdateDisplay(scrollFrame)
 				IsPurchasing = isPurchasing,
 				IsFeatured = isFeatured,
 				StockAmount = currentStock,
-				CanBuy = false,
-				CanRobux = false
+				CanBuy = (isFeatured and currentStock > 0),
+				CanRobux = (ROBUX_PRODUCTS[carName] ~= nil)
 			}
-
-			-- 1. Cash Buying (Must be Featured AND Have Stock)
-			if isFeatured and currentStock > 0 then
-				vm.CanBuy = true
-			else
-				vm.CanBuy = false
-			end
-
-			-- 2. Robux Buying (Always Available if Configured)
-			if ROBUX_PRODUCTS[carName] then vm.CanRobux = true else vm.CanRobux = false end
-
 			RenderCard(card, carName, vm)
 		end
 	end
@@ -174,6 +156,10 @@ end
 -- ============================================================================
 local function init()
 	local gui, mainFrame, scrollFrame, timerLabel, rerollBtn, closeBtn = getUI()
+	
+	-- ✅ CRITICAL FIX: FORCE CLIPPING SO CARS DON'T POP OUT
+	scrollFrame.ClipsDescendants = true 
+	
 	gui.Enabled = false 
 	Kit.Inventory:Init(SHOP_CARS)
 
@@ -186,6 +172,17 @@ local function init()
 	for _, carName in ipairs(SHOP_CARS) do
 		local card = scrollFrame:WaitForChild(carName, 5)
 		if card then
+			-- 🟢 WIGGLE SETUP
+			local specificImageName = carName .. "-Image"
+			local imageButton = card:FindFirstChild(specificImageName)
+			if not imageButton then imageButton = card:FindFirstChild("CarImage") end 
+
+			if imageButton then
+				-- Force ZIndex low so it stays behind popups
+				imageButton.ZIndex = 5 
+				Kit.Tween:SetupWiggle(imageButton)
+			end
+
 			local buyBtn = card:FindFirstChild("BuyButton")
 			if buyBtn then
 				Kit.Tween:SetupButton(buyBtn, function()
@@ -221,7 +218,13 @@ local function init()
 	RemoteOpen.OnClientEvent:Connect(function()
 		Kit.Sound:Play("Open")
 		gui.Enabled = true 
-		currentState = FuncGetState:InvokeServer()
+
+		-- INSTANT LOAD
+		currentState = {Featured = {}, Stock = {}, StockLimit = {}, Purchased = {}}
+		UpdateDisplay(scrollFrame)
+
+		local realState = FuncGetState:InvokeServer()
+		currentState = realState
 		UpdateDisplay(scrollFrame)
 	end)
 
@@ -233,11 +236,3 @@ local function init()
 end
 
 if player.Character then init() else player.CharacterAdded:Wait(); init() end
-
--- In LocalShopController
-RemoteOpen.OnClientEvent:Connect(function()
-	Kit.Sound:Play("Open") -- ✅ This now triggers the advanced layered sound!
-	gui.Enabled = true 
-	currentState = FuncGetState:InvokeServer()
-	UpdateDisplay(scrollFrame)
-end)
