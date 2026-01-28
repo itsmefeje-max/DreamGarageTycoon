@@ -1,178 +1,111 @@
--- [[ MODULE SCRIPT: ShopFrontendKit (Advanced Audio + Wiggle) ]]
-local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
-local Debris = game:GetService("Debris")
-local RunService = game:GetService("RunService") 
+-- [[ SERVER SCRIPT: ReceiptRouter ]]
+-- Centralizes MarketplaceService.ProcessReceipt for the entire game.
+-- UPDATED: Fixes Infinite Yield by looking in ServerStorage for Reroll Function.
+
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ServerStorage = game:GetService("ServerStorage")
 
-local Kit = {}
-local player = Players.LocalPlayer
+-- ⚙️ PRODUCT IDs
+local TABLET_2X_ID = 3509697462 -- Your Tablet ID
+local SHOP_REROLL_ID = 3520990584 -- ✅ Your Reroll ID
 
--- ============================================================================
--- 🔊 ADVANCED SOUND CONTROLLER
--- ============================================================================
-local SoundCtrl = {}
-SoundCtrl.Enabled = true
-
-local SFX_MAP = {
-	Open = {
-		{ Id = "rbxassetid://9083627113", Vol = 0.6, Pitch = 1.0, Var = 0.05 },
-		{ Id = "rbxassetid://148752521", Vol = 0.4, Pitch = 0.8, Var = 0.1 },
-	},
-	Hover = "rbxassetid://6895079853",
-	Click = "rbxassetid://9083627113",
-	BuySuccess = "rbxassetid://140072726814802",
-	BuyFail = "rbxassetid://3779045779",
-	PaidReroll = "rbxassetid://140072726814802", 
-	AutoRestock = "rbxassetid://134952684776633"
+-- 🚗 CAR PRODUCT IDs (Add these when you create them!)
+-- Format: [Product_ID] = "CarName"
+local CAR_PRODUCT_IDS = {
+	[3524326648] = "Delta", -- The 5 Robux ID
+	[3524327150] = "Iva",
+	[3524327478] = "Atom",
+	[3524327780] = "Windsor",
+	[3524328208] = "Senator",
+	[3524328713] = "Riva"
 }
 
-local function playInstance(id, vol, pitch, variance)
-	local s = Instance.new("Sound")
-	s.SoundId = id
-	s.Volume = vol or 0.5
-	s.PlaybackSpeed = (pitch or 1) + (math.random() * 2 - 1) * (variance or 0.05)
-	s.Name = "SFX_Advanced"
-	s.Parent = SoundService
-	s:Play()
-	Debris:AddItem(s, 2)
-end
+-- 🔗 REFERENCES
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
-function SoundCtrl:Play(name)
-	if not self.Enabled then return end
-	local data = SFX_MAP[name]
-	if not data then return end
+-- ✅ FIX: Look for the function in ServerStorage (Shared Location)
+-- This prevents the "Infinite Yield" error from the previous script.
+local ShopRerollFunc = ServerStorage:WaitForChild("ShopRerollFunction")
 
-	if type(data) == "string" then
-		playInstance(data, 0.5, 1, 0.05)
-	elseif type(data) == "table" then
-		for _, layer in ipairs(data) do
-			playInstance(layer.Id, layer.Vol, layer.Pitch, layer.Var)
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+
+	-- 1. Handle Player Leaving/Crashing
+	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+
+	local pid = receiptInfo.ProductId
+
+	-- ====================================================
+	-- PRODUCT: TABLET 2X EARNINGS
+	-- ====================================================
+	if pid == TABLET_2X_ID then
+		local myPlotName = player:GetAttribute("OccupiedPlot")
+		local plot = TycoonFolder:FindFirstChild(myPlotName or "")
+
+		-- If plot isn't loaded yet, retry later
+		if not plot or not plot:FindFirstChild("PendingEarnings") then 
+			return Enum.ProductPurchaseDecision.NotProcessedYet 
 		end
-	end
-end
-Kit.Sound = SoundCtrl
 
--- ============================================================================
--- 🎨 TWEEN CONTROLLER
--- ============================================================================
-local TweenCtrl = {}
-local T_SHAKE = TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 4, true)
-local T_RESET = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local pendingVal = plot.PendingEarnings
+		local amount = pendingVal.Value
 
--- ✅ WIGGLE EFFECT (Pure Rotation)
-function TweenCtrl:SetupWiggle(guiObject)
-	if not guiObject then return end
-
-	local wiggleConnection = nil
-	local isWiggling = false
-	
-	local SPEED = 12  
-	local ANGLE = 4   
-
-	local function startWiggle()
-		if isWiggling then return end
-		isWiggling = true
-		
-		local t = 0
-		wiggleConnection = RunService.RenderStepped:Connect(function(dt)
-			if not guiObject.Parent then 
-				if wiggleConnection then wiggleConnection:Disconnect() end
-				return 
+		-- Logic: Reset pending, add 2x to cash
+		if amount > 0 then
+			pendingVal.Value = 0
+			local ls = player:FindFirstChild("leaderstats")
+			if ls and ls:FindFirstChild("Cash") then
+				ls.Cash.Value += (amount * 2)
 			end
-			t = t + dt * SPEED
-			guiObject.Rotation = math.sin(t) * ANGLE
-		end)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		else
+			-- Edge case: 0 earnings, grant anyway to avoid infinite retry loop
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+
+		-- ====================================================
+		-- PRODUCT: SHOP REROLL (Restock)
+		-- ====================================================
+	elseif pid == SHOP_REROLL_ID then
+		if ShopRerollFunc then
+			ShopRerollFunc:Invoke(player) -- Call LocalShopService via ServerStorage
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		else
+			warn("⚠️ Critical: ShopRerollFunction missing in ServerStorage!")
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+
+		-- ====================================================
+		-- PRODUCT: BUY CAR WITH ROBUX
+		-- ====================================================
+	elseif CAR_PRODUCT_IDS[pid] then
+		local carName = CAR_PRODUCT_IDS[pid]
+		local CarTools = ServerStorage:FindFirstChild("CarTools")
+
+		-- Try finding the tool by exact name or with " Item" suffix
+		local tool = CarTools and (CarTools:FindFirstChild(carName) or CarTools:FindFirstChild(carName.." Item"))
+
+		if tool then
+			-- Grant the car directly to Backpack and StarterGear
+			local newTool = tool:Clone()
+			newTool:SetAttribute("IssuedByServer", true)
+			newTool:SetAttribute("IssuedAt", os.time())
+			newTool:SetAttribute("ToolId", tool.Name)
+			newTool.Parent = player.Backpack
+
+			local gearClone = newTool:Clone()
+			gearClone.Parent = player.StarterGear
+
+			print("✅ Gave Robux Car: " .. carName .. " to " .. player.Name)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		else
+			warn("❌ Critical: Player bought " .. carName .. " but the Tool is missing in ServerStorage!")
+			return Enum.ProductPurchaseDecision.NotProcessedYet -- Retry until you fix the tool name
+		end
 	end
 
-	local function stopWiggle()
-		if not isWiggling then return end
-		isWiggling = false
-		
-		if wiggleConnection then 
-			wiggleConnection:Disconnect() 
-			wiggleConnection = nil
-		end
-		TweenService:Create(guiObject, T_RESET, {Rotation = 0}):Play()
-	end
-
-	guiObject.MouseEnter:Connect(startWiggle)
-	guiObject.MouseLeave:Connect(stopWiggle)
-
-	guiObject.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			startWiggle()
-		end
-	end)
-
-	guiObject.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			stopWiggle()
-		end
-	end)
+	-- Unknown Product
+	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
-
-function TweenCtrl:SetupButton(btn, onClick)
-	if not btn or not btn:IsA("GuiButton") then return end
-
-	btn.AutoButtonColor = false
-	btn.Active = true
-
-	local originalBg = btn.BackgroundColor3
-	local originalImg = btn:IsA("ImageButton") and btn.ImageColor3 or nil
-	local T_DIM = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
-	local function applyDim(isDim)
-		local h,s,v = originalBg:ToHSV()
-		local dimBg = Color3.fromHSV(h, s, math.clamp(v * 0.75, 0, 1))
-		
-		local goals = { BackgroundColor3 = isDim and dimBg or originalBg }
-		if originalImg then 
-			local h2,s2,v2 = originalImg:ToHSV()
-			goals.ImageColor3 = isDim and Color3.fromHSV(h2, s2, math.clamp(v2 * 0.75, 0, 1)) or originalImg 
-		end
-		TweenService:Create(btn, T_DIM, goals):Play()
-	end
-
-	btn.MouseEnter:Connect(function()
-		Kit.Sound:Play("Hover")
-		applyDim(true)
-	end)
-	btn.MouseLeave:Connect(function() applyDim(false) end)
-
-	btn.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			applyDim(true)
-		end
-	end)
-
-	btn.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			applyDim(false)
-		end
-	end)
-
-	btn.Activated:Connect(function()
-		Kit.Sound:Play("Click")
-		if onClick then onClick() end
-	end)
-end
-
-function TweenCtrl:Shake(guiObject)
-	local origPos = guiObject.Position
-	local t = TweenService:Create(guiObject, T_SHAKE, {Position = origPos + UDim2.new(0,5,0,0)})
-	t:Play()
-	t.Completed:Connect(function() guiObject.Position = origPos end)
-end
-Kit.Tween = TweenCtrl
-
-local ToastCtrl = {} 
-function ToastCtrl:Show(msg, color) end
-Kit.Toast = ToastCtrl
-
-local InvCtrl = {} 
-function InvCtrl:Init(names) end
-function InvCtrl:GetCount(n) return 0 end
-Kit.Inventory = InvCtrl
-
-return Kit
