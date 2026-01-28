@@ -22,12 +22,12 @@ local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
 
 -- 🔴 ROBUX IDS
 local ROBUX_PRODUCTS = {
-	Delta   = 0000000, 
-	Iva     = 1111111, 
-	Atom    = 2222222, 
-	Windsor = 3333333, 
-	Senator = 4444444, 
-	Riva    = 5555555 
+	Delta   = 3524326648, 
+	Iva     = 3524327150, 
+	Atom    = 3524327478, 
+	Windsor = 3524327780, 
+	Senator = 3524328208, 
+	Riva    = 3524328713
 }
 
 -- 📡 REMOTES
