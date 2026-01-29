@@ -1,6 +1,7 @@
--- [[ SERVER SIDE: TycoonDataHandler (SECURE V51 - Audit Fix) ]]
+-- [[ SERVER SIDE: TycoonDataHandler (SECURE V27 - Optimized) ]]
 -- [[ SECURITY: ToolId Identity, Pad Whitelisting, State Repair, Live Sanitization ]]
--- [[ AUDIT FIX: Backpack Saving + Event Safety ]]
+-- [[ AUDIT FIX: Single Container Saving + Backpack Dirty Tracking ]]
+-- [[ BUG FIX: Removed Duplicate Deletion (Fixed "One Car" Bug) ]]
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -13,12 +14,13 @@ local HttpService = game:GetService("HttpService")
 -- ----------------------------------------------------------------------------
 -- ⚙️ CONFIGURATION & CONSTANTS
 -- ----------------------------------------------------------------------------
-local DATA_KEY = "TycoonData_Release_V25_Fixed"
+local DATA_KEY = "TycoonData_Release_V27_Optimized" -- Bumped version for safety
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 local AUTOSAVE_INTERVAL = 180       
 local MIN_SAVE_INTERVAL = 60        
-local MAX_RETRIES = 3               
+local MAX_RETRIES = 3             
+  
 local MAX_INVENTORY_SIZE = 500      
 local MAX_LAYOUT_SIZE = 200         
 local STARTER_CAR_NAME = "Delta Item"
@@ -266,7 +268,7 @@ local function RestoreLayout(player, plot, layoutData)
 end
 
 -- ----------------------------------------------------------------------------
--- 💾 SAVING (AUDIT FIX APPLIED)
+-- 💾 SAVING (UPDATED: Single Container + Multi Fix)
 -- ----------------------------------------------------------------------------
 local function save(player, isClosing)
 	local session = SessionData[player]
@@ -277,20 +279,24 @@ local function save(player, isClosing)
 
 	print("💾 Saving data for " .. player.Name .. "...")
 
-	-- [[ AUDIT FIX: SCAN BOTH CONTAINERS ]]
 	local inventory = {}
 	local invCount = 0
-	local processedTools = {} -- Prevent dupes
+	
+	-- We track unique instances to verify we are not scanning the same object twice (unlikely but safe)
+	local seenInstances = {} 
 
 	local function scanContainer(container)
 		if not container then return end
 		for _, tool in pairs(container:GetChildren()) do
-			if validateTool(tool) then
+			if validateTool(tool) and not seenInstances[tool] then
+				seenInstances[tool] = true 
+				
 				if invCount < MAX_INVENTORY_SIZE then
 					local id = tool:GetAttribute("ToolId")
-					if id and not processedTools[id] then
-						processedTools[id] = true
-						table.insert(inventory, id)
+					if id then
+						-- ✅ FIX: Removed "if not processedTools[id]" check.
+						-- Now allows duplicates to be saved.
+						table.insert(inventory, id) 
 						invCount += 1
 					end
 				end
@@ -298,8 +304,9 @@ local function save(player, isClosing)
 		end
 	end
 
+	-- ✅ USER REQUEST: Save ONLY StarterGear (Permanent Inventory)
+	-- We do not scan Backpack to avoid issues with death/respawn clearing items.
 	scanContainer(player:FindFirstChild("StarterGear"))
-	scanContainer(player:FindFirstChild("Backpack")) -- ✅ Added Backpack scan
 
 	-- 2. SAVE LAYOUT
 	local layout = {}
@@ -346,7 +353,7 @@ local function save(player, isClosing)
 	local success, err
 	for attempt = 1, MAX_RETRIES do
 		success, err = pcall(function()
-			PlayerDataStore:UpdateAsync("User_V25_" .. player.UserId, function(oldData)
+			PlayerDataStore:UpdateAsync("User_V27_" .. player.UserId, function(oldData)
 				oldData = oldData or {}
 				local stillRestored = player:GetAttribute("RestoredPending") or 0
 				local finalPending = stillRestored + currentPendingInTycoon
@@ -359,7 +366,7 @@ local function save(player, isClosing)
 					Layout = layout,
 					PendingEarnings = finalPending,
 					LastUpdated = os.time(),
-					DataVersion = "V51_Secure"
+					DataVersion = "V27_Optimized"
 				}
 			end)
 		end)
@@ -393,10 +400,20 @@ local function InitializePlayer(player)
 
 	local function setDirty() markDirty(player) end
 	cash.Changed:Connect(setDirty); wallet.Changed:Connect(setDirty); atm.Changed:Connect(setDirty)
+	
+	-- ✅ USER REQUEST: Mark Dirty on Backpack Changes
+	-- This ensures that if a player interacts with their current inventory, the game knows to save.
+	local backpack = player:WaitForChild("Backpack", 10)
+	if backpack then
+		backpack.ChildAdded:Connect(setDirty)
+		backpack.ChildRemoved:Connect(setDirty)
+	end
+	
+	-- We also keep StarterGear dirty tracking since that is what we are saving.
 	local gear = player:WaitForChild("StarterGear", 10)
 	if gear then gear.ChildAdded:Connect(setDirty); gear.ChildRemoved:Connect(setDirty) end
 
-	local key = "User_V25_" .. player.UserId
+	local key = "User_V27_" .. player.UserId
 	local data
 	local success, err = pcall(function() data = PlayerDataStore:GetAsync(key) end)
 
