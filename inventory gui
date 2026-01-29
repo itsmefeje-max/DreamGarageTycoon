@@ -60,6 +60,23 @@ local closeButton = mainWindow:WaitForChild("CloseButton", 10)
 local tierFrame = myScreenGui:WaitForChild("TierFrame", 10)
 local tierContainer = tierFrame:WaitForChild("TierContainer", 10)
 
+-- ✅ EMPTY INDICATOR (ONLY ADDED FUNCTIONALITY)
+local emptyIndicatorFrame = myScreenGui:FindFirstChild("InventoryWindow", true)
+local emptyIndicatorLabel = emptyIndicatorFrame and emptyIndicatorFrame:FindFirstChild("Indicator-v2", true) or nil
+
+local function updateEmptyIndicator(tierName, isEmpty)
+	if not emptyIndicatorLabel then return end
+
+	if isEmpty then
+		emptyIndicatorLabel.Text = ("Your %s Stash is Empty"):format(tierName)
+		emptyIndicatorLabel.Visible = true
+		emptyIndicatorLabel.Active = false
+	else
+		emptyIndicatorLabel.Visible = false
+		emptyIndicatorLabel.Active = false
+	end
+end
+
 -- 🔒 STARTUP STATE
 if mainWindow then mainWindow.Visible = false end
 if tierFrame then tierFrame.Visible = false end
@@ -233,14 +250,12 @@ local function addButtonEffects(btn, scaleOnly)
 			TweenService:Create(scale, TweenInfo.new(0.2), {Scale = 1.1}):Play()
 
 			if not scaleOnly then
-				-- ✅ FIXED: Logic to support both TextButton (Background) and ImageButton (Image)
 				local goals = {BackgroundColor3 = CONFIG.Colors.Dim}
-				
-				-- Only attempt to tween ImageColor3 if the button supports it
+
 				if btn:IsA("ImageButton") or btn:IsA("ImageLabel") then
 					goals.ImageColor3 = CONFIG.Colors.Dim
 				end
-				
+
 				TweenService:Create(btn, TweenInfo.new(0.2), goals):Play()
 			end
 		end)
@@ -250,10 +265,8 @@ local function addButtonEffects(btn, scaleOnly)
 			TweenService:Create(scale, TweenInfo.new(0.2), {Scale = 1}):Play()
 
 			if not scaleOnly then
-				-- ✅ FIXED: Logic to support both TextButton (Background) and ImageButton (Image)
 				local goals = {BackgroundColor3 = getRarityColor(btn.Name)}
-				
-				-- Only attempt to tween ImageColor3 if the button supports it
+
 				if btn:IsA("ImageButton") or btn:IsA("ImageLabel") then
 					goals.ImageColor3 = CONFIG.Colors.Normal
 				end
@@ -292,7 +305,6 @@ local function updateInventory()
 		end
 	end
 
-	-- Data Scan
 	local inventoryData = {} 
 
 	local function scan(loc)
@@ -322,13 +334,16 @@ local function updateInventory()
 	scan(player:FindFirstChild("Backpack")) 
 	scan(player.Character)
 
-	-- Render
+	local renderedAnyInTab = false
+
 	for carName, data in pairs(inventoryData) do
 		local tool = data.Tool
 		local count = data.Count
 		local stats = CarStats.Cars[carName]
 
 		if stats and stats.Rarity == currentTab then
+			renderedAnyInTab = true
+
 			local btn = Instance.new("TextButton")
 			btn.Name = stats.Rarity
 			btn.Text = "" 
@@ -341,7 +356,6 @@ local function updateInventory()
 			corner.CornerRadius = UDim.new(0, 8)
 			corner.Parent = btn
 
-			-- Image
 			local icon = Instance.new("ImageLabel")
 			icon.Name = "CarIcon"
 			icon.Parent = btn
@@ -364,7 +378,6 @@ local function updateInventory()
 				icon.Image = CONFIG.Images.Default
 			end
 
-			-- Text
 			local nameLabel = Instance.new("TextLabel")
 			nameLabel.Name = "CarName"
 			nameLabel.Parent = btn
@@ -379,7 +392,6 @@ local function updateInventory()
 
 			ApplyUniversalGlow(nameLabel, stats.Rarity)
 
-			-- ✅ UPDATED: Multiplier Count (ALWAYS SHOW if >= 1)
 			if count >= 1 then
 				local countTag = Instance.new("TextLabel")
 				countTag.Name = "MultiplierCount"
@@ -400,7 +412,6 @@ local function updateInventory()
 				countCorner.Parent = countTag
 			end
 
-			-- Equipped Logic
 			local isEquipped = false
 			local charTool = player.Character:FindFirstChild(tool.Name)
 			if charTool then isEquipped = true end
@@ -446,6 +457,8 @@ local function updateInventory()
 			end)
 		end
 	end
+
+	updateEmptyIndicator(currentTab, not renderedAnyInTab)
 end
 
 -- ============================================================================
@@ -464,7 +477,6 @@ local function performClose()
 
 	toggleOtherGuis(false)
 
-	-- ✅ FIXED: Restore the User's ORIGINAL FOV instead of forcing 70
 	TweenService:Create(camera, CONFIG.Tween, {FieldOfView = savedFOV}):Play()
 
 	if shopMusic.IsPlaying then
@@ -485,7 +497,6 @@ end)
 openButton.MouseButton1Click:Connect(function()
 	playSfx(CONFIG.Audio.Click, 0.5)
 
-	-- ✅ CAPTURE CURRENT FOV BEFORE CHANGING IT
 	savedFOV = camera.FieldOfView
 
 	if gameThemeSound and gameThemeSound.IsPlaying then gameThemeSound:Pause() end
@@ -524,4 +535,215 @@ if tierContainer then
 			end)
 		end
 	end
+end
+
+-- ✅ FINAL: PASTE THIS AT THE VERY BOTTOM (SCOPED: ONLY InventoryWindow > Indicator-v2)
+-- ✅ Removes label background edits + removes shadow label (no text covering)
+do
+	if not mainWindow then return end
+	local indicator = mainWindow:FindFirstChild("Indicator-v2", true)
+	if not indicator or not indicator:IsA("TextLabel") then return end
+
+	-- Names for ONLY what we add (won't touch anything else)
+	local TAG = "__InvEmptyFX"
+	local STROKE_NAME = TAG .. "_Stroke"
+	local TEXTGRAD_NAME = TAG .. "_TextGrad"
+	local SCALE_NAME = TAG .. "_Scale"
+	local SHINE_NAME = TAG .. "_Shine"
+	local SHINEGRAD_NAME = TAG .. "_ShineGrad"
+
+	local function getOrMake(className, parent, name)
+		local obj = parent:FindFirstChild(name)
+		if obj and obj.ClassName == className then return obj end
+		if obj then obj:Destroy() end
+		obj = Instance.new(className)
+		obj.Name = name
+		obj.Parent = parent
+		return obj
+	end
+
+	-- Tier aesthetic palette (NO background colors touched)
+	local function tierStyle(tier)
+		local map = {
+			Common = {
+				textGrad = ColorSequence.new(Color3.fromRGB(245,245,245), Color3.fromRGB(165,165,165)),
+				stroke = Color3.fromRGB(10,10,10),
+				glow = Color3.fromRGB(255,255,255),
+			},
+			Uncommon = {
+				textGrad = ColorSequence.new(Color3.fromRGB(170,255,195), Color3.fromRGB(10,190,75)),
+				stroke = Color3.fromRGB(0,60,20),
+				glow = Color3.fromRGB(160,255,200),
+			},
+			Rare = {
+				textGrad = ColorSequence.new(Color3.fromRGB(175,225,255), Color3.fromRGB(40,125,255)),
+				stroke = Color3.fromRGB(0,35,85),
+				glow = Color3.fromRGB(170,220,255),
+			},
+			Epic = {
+				textGrad = ColorSequence.new(Color3.fromRGB(235,180,255), Color3.fromRGB(160,70,255)),
+				stroke = Color3.fromRGB(55,0,90),
+				glow = Color3.fromRGB(235,190,255),
+			},
+			Legendary = {
+				textGrad = ColorSequence.new(Color3.fromRGB(255,240,165), Color3.fromRGB(255,175,55)),
+				stroke = Color3.fromRGB(90,45,0),
+				glow = Color3.fromRGB(255,235,160),
+			},
+			Mythic = {
+				textGrad = ColorSequence.new({
+					ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 90, 90)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 245, 140)),
+					ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 90, 255)),
+				}),
+				stroke = Color3.fromRGB(60,0,0),
+				glow = Color3.fromRGB(255,200,255),
+			},
+		}
+		return map[tier] or map.Common
+	end
+
+	local function tierFromText(txt)
+		return (string.match(txt or "", "^Your%s+(%w+)%s+Stash%s+is%s+Empty")) or currentTab or "Common"
+	end
+
+	-- ✅ remove old shadow if it exists (from previous versions)
+	local oldShadow = indicator:FindFirstChild(TAG .. "_Shadow")
+	if oldShadow and oldShadow:IsA("TextLabel") then
+		oldShadow:Destroy()
+	end
+
+	-- Core FX objects (ONLY under indicator)
+	local stroke = getOrMake("UIStroke", indicator, STROKE_NAME)
+	stroke.LineJoinMode = Enum.LineJoinMode.Round
+	stroke.Thickness = 3
+	stroke.Transparency = 0.05
+
+	local textGrad = getOrMake("UIGradient", indicator, TEXTGRAD_NAME)
+	textGrad.Rotation = -20
+
+	local scale = getOrMake("UIScale", indicator, SCALE_NAME)
+
+	-- Glass shine overlay
+	local shine = getOrMake("Frame", indicator, SHINE_NAME)
+	shine.BackgroundColor3 = Color3.fromRGB(255,255,255)
+	shine.BackgroundTransparency = 1
+	shine.Size = UDim2.new(1, 0, 1, 0)
+	shine.Position = UDim2.new(0, 0, 0, 0)
+	shine.Visible = true
+
+	-- copy corner if label has it (optional)
+	local existingCorner = indicator:FindFirstChildOfClass("UICorner")
+	if existingCorner and not shine:FindFirstChildOfClass("UICorner") then
+		existingCorner:Clone().Parent = shine
+	end
+
+	local shineGrad = getOrMake("UIGradient", shine, SHINEGRAD_NAME)
+	shineGrad.Rotation = -35
+	shineGrad.Color = ColorSequence.new(Color3.fromRGB(255,255,255), Color3.fromRGB(255,255,255))
+	shineGrad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0.00, 1.00),
+		NumberSequenceKeypoint.new(0.35, 1.00),
+		NumberSequenceKeypoint.new(0.48, 0.25),
+		NumberSequenceKeypoint.new(0.52, 0.25),
+		NumberSequenceKeypoint.new(0.65, 1.00),
+		NumberSequenceKeypoint.new(1.00, 1.00),
+	})
+
+	-- ZIndex safety (ONLY affects indicator + shine, not TierFrame)
+	local function enforceZ()
+		indicator.ZIndex = math.max(indicator.ZIndex or 1, (mainWindow.ZIndex or 1) + 200)
+		shine.ZIndex = indicator.ZIndex + 2
+	end
+
+	-- Animation control
+	local pulseConn = nil
+	local running = false
+
+	local function stopAnim()
+		running = false
+		if pulseConn then pulseConn:Disconnect() pulseConn = nil end
+		shine.BackgroundTransparency = 1
+	end
+
+	local function startAnim()
+		if running then return end
+		running = true
+
+		-- pop-in (scale + fade) - text only, no shadow
+		scale.Scale = 0.92
+		indicator.TextTransparency = 0.35
+		TweenService:Create(scale, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
+		TweenService:Create(indicator, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0}):Play()
+
+		-- subtle breathing + moving shine sweep
+		local t0 = tick()
+		pulseConn = RunService.Heartbeat:Connect(function()
+			if not indicator.Visible then return end
+			enforceZ()
+
+			local t = tick() - t0
+
+			-- shimmer in text gradient
+			local shimmer = 0.12 + 0.10 * math.sin(t * 2.2)
+			textGrad.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, shimmer),
+				NumberSequenceKeypoint.new(1, shimmer + 0.04),
+			})
+
+			-- glass shine sweep across the label
+			shine.BackgroundTransparency = 0.88
+			local sweep = (t * 0.55) % 1
+			shineGrad.Offset = Vector2.new(-1.2 + sweep * 2.4, 0)
+
+			-- tiny glow pulse via stroke thickness
+			stroke.Thickness = 2.6 + 0.9 * (0.5 + 0.5 * math.sin(t * 2.2))
+		end)
+	end
+
+	local function applyTierLook()
+		local tier = tierFromText(indicator.Text)
+		local st = tierStyle(tier)
+
+		-- IMPORTANT: do NOT touch BackgroundTransparency/BackgroundColor3 (your request)
+
+		stroke.Color = Color3.fromRGB(
+			math.floor((st.stroke.R * 255 + st.glow.R * 255 * 0.25) / 1.25),
+			math.floor((st.stroke.G * 255 + st.glow.G * 255 * 0.25) / 1.25),
+			math.floor((st.stroke.B * 255 + st.glow.B * 255 * 0.25) / 1.25)
+		)
+		textGrad.Color = st.textGrad
+	end
+
+	local function refresh()
+		enforceZ()
+		indicator.Active = false -- your rule
+		applyTierLook()
+
+		if indicator.Visible then
+			startAnim()
+		else
+			stopAnim()
+		end
+	end
+
+	-- React ONLY to this label
+	indicator:GetPropertyChangedSignal("Visible"):Connect(refresh)
+	indicator:GetPropertyChangedSignal("Text"):Connect(refresh)
+	indicator:GetPropertyChangedSignal("ZIndex"):Connect(enforceZ)
+
+	-- Update tier colors even if text doesn't change (tier switching)
+	task.spawn(function()
+		local last = nil
+		while indicator.Parent do
+			if currentTab ~= last then
+				last = currentTab
+				applyTierLook()
+			end
+			task.wait(0.05)
+		end
+	end)
+
+	-- initial
+	refresh()
 end
