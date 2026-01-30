@@ -1,7 +1,6 @@
--- [[ SERVER SIDE: TycoonDataHandler (SECURE V27 - Optimized) ]]
--- [[ SECURITY: ToolId Identity, Pad Whitelisting, State Repair, Live Sanitization ]]
--- [[ AUDIT FIX: Single Container Saving + Backpack Dirty Tracking ]]
--- [[ BUG FIX: Removed Duplicate Deletion (Fixed "One Car" Bug) ]]
+-- [[ SERVER SIDE: TycoonDataHandler (SECURE V35 - FINAL GOLD) ]]
+-- [[ SECURITY: GUID Identity, Server Authority, Filtered Anti-Wipe ]]
+-- [[ STABILITY: Force-Save on Shutdown, Guaranteed Mutex Unlock ]]
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -14,11 +13,12 @@ local HttpService = game:GetService("HttpService")
 -- ----------------------------------------------------------------------------
 -- ⚙️ CONFIGURATION & CONSTANTS
 -- ----------------------------------------------------------------------------
-local DATA_KEY = "TycoonData_Release_V27_Optimized" -- Bumped version for safety
+-- NOTE: Stable Key to preserve player data.
+local DATA_KEY = "TycoonData_Release_V27_Optimized" 
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 local AUTOSAVE_INTERVAL = 180       
-local MIN_SAVE_INTERVAL = 60        
+local MIN_SAVE_INTERVAL = 60       
 local MAX_RETRIES = 3             
   
 local MAX_INVENTORY_SIZE = 500      
@@ -56,7 +56,10 @@ local function logAdmin(message, severity)
 end
 
 local function markDirty(player)
-	if SessionData[player] then SessionData[player].IsDirty = true end
+	local session = SessionData[player]
+	if session and not session.IsDirty then 
+		session.IsDirty = true 
+	end
 end
 
 -- ----------------------------------------------------------------------------
@@ -64,14 +67,16 @@ end
 -- ----------------------------------------------------------------------------
 local function tagIssued(tool, originalName)
 	if not tool then return end
+	-- SERVER AUTHORITY: We trust this because WE (the server) are setting it.
 	tool:SetAttribute("IssuedByServer", true)
 	tool:SetAttribute("IssuedAt", os.time())
-	tool:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
+	tool:SetAttribute("IssuedId", HttpService:GenerateGUID(false)) 
 	tool:SetAttribute("ToolId", originalName)
 end
 
 local function validateTool(tool)
 	if not tool then return false end
+	-- Server-side check of Server-side attributes
 	if not tool:GetAttribute("IssuedByServer") then return false end
 	local id = tool:GetAttribute("ToolId")
 	if not id then return false end
@@ -87,14 +92,19 @@ local function sanitizeInventory(player)
 		if container then
 			for _, tool in ipairs(container:GetChildren()) do
 				if tool:IsA("Tool") then
-					if not validateTool(tool) then
-						logAdmin("Destroyed unauthorized/renamed tool: " .. tool.Name .. " (" .. player.Name .. ")", "WARN")
-						tool:Destroy()
-					else
-						if tool.CanBeDropped then tool.CanBeDropped = false end
-						local realId = tool:GetAttribute("ToolId")
-						if realId and tool.Name ~= realId then
-							tool.Name = realId 
+					-- ✅ STRICT SANITIZATION (V34+)
+					-- We ONLY police tools that have the "ToolId" attribute.
+					if tool:GetAttribute("ToolId") then
+						if not validateTool(tool) then
+							logAdmin("Destroyed unauthorized/spoofed car tool: " .. tool.Name .. " (" .. player.Name .. ")", "WARN")
+							tool:Destroy()
+						else
+							-- Fix Name if needed
+							if tool.CanBeDropped then tool.CanBeDropped = false end
+							local realId = tool:GetAttribute("ToolId")
+							if realId and tool.Name ~= realId then
+								tool.Name = realId 
+							end
 						end
 					end
 				end
@@ -114,7 +124,7 @@ function MoneyManager.GetBalance(player, currencyType)
 end
 
 -- ----------------------------------------------------------------------------
--- 🛠️ ASSET LOOKUPS (Used by other scripts now too)
+-- 🛠️ ASSET LOOKUPS
 -- ----------------------------------------------------------------------------
 local function FindToolNameFromModel(modelName)
 	if CarTools:FindFirstChild(modelName) then return modelName end
@@ -157,7 +167,7 @@ local function getMainPart(obj)
 end
 
 local function generateCarGUID(player)
-	return player.UserId .. "_" .. os.time() .. "_" .. math.random(1000,9999)
+	return player.UserId .. "_" .. HttpService:GenerateGUID(false)
 end
 
 -- ----------------------------------------------------------------------------
@@ -217,6 +227,7 @@ local function RestoreLayout(player, plot, layoutData)
 	local validPads = {}
 	for _, p in ipairs(padsFolder:GetChildren()) do validPads[p.Name] = true end
 	local processedPads = {}
+	local restoredCount = 0
 
 	for _, data in ipairs(layoutData) do
 		local toolName = data.Tool
@@ -258,6 +269,7 @@ local function RestoreLayout(player, plot, layoutData)
 
 						if padPart:FindFirstChild("PlacePrompt") then padPart.PlacePrompt.Enabled = false end
 						if padPart:FindFirstChild("PickupPrompt") then padPart.PickupPrompt.Enabled = true end
+						restoredCount += 1
 					end
 				end
 			end
@@ -265,134 +277,213 @@ local function RestoreLayout(player, plot, layoutData)
 		releasePadLock(lockId)
 		if _ % 5 == 0 then task.wait() end
 	end
+	
+	if restoredCount > 0 then
+		markDirty(player)
+		print("🏗️ Restored " .. restoredCount .. " cars for " .. player.Name)
+	end
 end
 
 -- ----------------------------------------------------------------------------
--- 💾 SAVING (UPDATED: Single Container + Multi Fix)
+-- 🔄 ADMIN API (BindableFunction)
+-- ----------------------------------------------------------------------------
+local AdminAPI = Instance.new("BindableFunction")
+AdminAPI.Name = "TycoonAdminAPI"
+AdminAPI.Parent = ServerStorage
+
+AdminAPI.OnInvoke = function(action, player)
+	if action == "ForceWipe" and player and SessionData[player] then
+		SessionData[player].ExplicitClear = true
+		if player:FindFirstChild("StarterGear") then player.StarterGear:ClearAllChildren() end
+		if player:FindFirstChild("Backpack") then player.Backpack:ClearAllChildren() end
+		markDirty(player)
+		print("⚠️ FORCE WIPE INITIATED FOR: " .. player.Name)
+		return true
+	end
+	return false
+end
+
+-- ----------------------------------------------------------------------------
+-- 💾 SAVING (V35 - FINAL GOLD)
 -- ----------------------------------------------------------------------------
 local function save(player, isClosing)
 	local session = SessionData[player]
 	if not session or not session.DataLoaded then return end
 
+	-- ✅ 1. MUTEX WITH FORCE-SAVE ON SHUTDOWN
+	if session.IsSaving then 
+		if isClosing then
+			-- Wait up to 4 seconds for the previous save to finish
+			local s = os.clock()
+			while session.IsSaving and (os.clock() - s < 4) do
+				task.wait(0.1)
+			end
+			
+			-- 🔥 FORCE UNLOCK IF TIMED OUT
+			if session.IsSaving then
+				warn("⚠️ Save Lock timed out for " .. player.Name .. ". FORCING final save.")
+				session.IsSaving = false 
+			else
+				-- If it finished in time, we let it be (or save again if dirty, safest to proceed)
+			end
+		else
+			return -- Autosave skips if locked
+		end
+	end
+
 	if not isClosing and (os.time() - session.LastSave < MIN_SAVE_INTERVAL) then return end
 	if not session.IsDirty and not isClosing then return end
 
-	print("💾 Saving data for " .. player.Name .. "...")
+	session.IsSaving = true -- 🔒 LOCK
 
-	local inventory = {}
-	local invCount = 0
-	
-	-- We track unique instances to verify we are not scanning the same object twice (unlikely but safe)
-	local seenInstances = {} 
+	-- ✅ 2. GUARANTEED EXECUTION WRAPPER
+	-- Using a function call ensures we can't 'return' out without running clean-up
+	local function executeSave()
+		print("💾 Saving data for " .. player.Name .. "...")
 
-	local function scanContainer(container)
-		if not container then return end
-		for _, tool in pairs(container:GetChildren()) do
-			if validateTool(tool) and not seenInstances[tool] then
-				seenInstances[tool] = true 
-				
-				if invCount < MAX_INVENTORY_SIZE then
-					local id = tool:GetAttribute("ToolId")
-					if id then
-						-- ✅ FIX: Removed "if not processedTools[id]" check.
-						-- Now allows duplicates to be saved.
-						table.insert(inventory, id) 
-						invCount += 1
+		local inventory = {}
+		local invCount = 0
+		local seenInstances = {} 
+
+		-- Inventory Scan Logic
+		local function scanContainer(container)
+			if not container then return end
+			for _, tool in pairs(container:GetChildren()) do
+				if validateTool(tool) and not seenInstances[tool] then
+					seenInstances[tool] = true 
+					if invCount < MAX_INVENTORY_SIZE then
+						local id = tool:GetAttribute("ToolId")
+						if id then
+							table.insert(inventory, id) 
+							invCount += 1
+						end
 					end
 				end
 			end
 		end
-	end
 
-	-- ✅ USER REQUEST: Save ONLY StarterGear (Permanent Inventory)
-	-- We do not scan Backpack to avoid issues with death/respawn clearing items.
-	scanContainer(player:FindFirstChild("StarterGear"))
+		scanContainer(player:FindFirstChild("StarterGear"))
 
-	-- 2. SAVE LAYOUT
-	local layout = {}
-	local plotName = player:GetAttribute("OccupiedPlot")
-	local currentPendingInTycoon = 0
+		-- Layout Scan Logic
+		local layout = {}
+		local plotName = player:GetAttribute("OccupiedPlot")
+		local currentPendingInTycoon = 0
 
-	if plotName and TycoonFolder:FindFirstChild(plotName) then
-		local plot = TycoonFolder[plotName]
-		if plot:FindFirstChild("PendingEarnings") then 
-			currentPendingInTycoon = plot.PendingEarnings.Value
-		end
-
-		local pads = plot:FindFirstChild("Pads")
-		if pads then
-			for _, padObject in pairs(pads:GetChildren()) do
-				local padPart = getMainPart(padObject)
-				if padPart then
-					local linked = padPart:FindFirstChild("LinkedCar")
-					local isOccupied = padPart:FindFirstChild("IsOccupied")
-
-					if linked and linked.Value then
-						local car = linked.Value
-						if not car.Parent or not car:IsDescendantOf(plot) then
-							linked.Value = nil
-							if isOccupied then isOccupied.Value = false end
-							continue
-						end
-						local isOwned = (car:GetAttribute("OwnerUserId") == player.UserId)
-						local hasGuid = (car:GetAttribute("CarGUID") ~= nil)
-
-						if isOwned and hasGuid then
-							local tName = FindToolNameFromModel(car.Name)
-							if tName then
-								table.insert(layout, {Tool = tName, Pad = padObject.Name})
+		if plotName and TycoonFolder:FindFirstChild(plotName) then
+			local plot = TycoonFolder[plotName]
+			if plot:FindFirstChild("PendingEarnings") then 
+				currentPendingInTycoon = plot.PendingEarnings.Value
+			end
+			local pads = plot:FindFirstChild("Pads")
+			if pads then
+				for _, padObject in pairs(pads:GetChildren()) do
+					local padPart = getMainPart(padObject)
+					if padPart then
+						local linked = padPart:FindFirstChild("LinkedCar")
+						local isOccupied = padPart:FindFirstChild("IsOccupied")
+						if linked and linked.Value then
+							local car = linked.Value
+							if not car.Parent or not car:IsDescendantOf(plot) then
+								linked.Value = nil
+								if isOccupied then isOccupied.Value = false end
+								continue
+							end
+							local isOwned = (car:GetAttribute("OwnerUserId") == player.UserId)
+							local hasGuid = (car:GetAttribute("CarGUID") ~= nil)
+							if isOwned and hasGuid then
+								local tName = FindToolNameFromModel(car.Name)
+								if tName then
+									table.insert(layout, {Tool = tName, Pad = padObject.Name})
+								end
 							end
 						end
 					end
 				end
 			end
 		end
-	end
 
-	-- 3. UPDATE ASYNC
-	local success, err
-	for attempt = 1, MAX_RETRIES do
-		success, err = pcall(function()
-			PlayerDataStore:UpdateAsync("User_V27_" .. player.UserId, function(oldData)
-				oldData = oldData or {}
-				local stillRestored = player:GetAttribute("RestoredPending") or 0
-				local finalPending = stillRestored + currentPendingInTycoon
+		-- ✅ 3. TRUE RETRY LOGIC
+		for attempt = 1, MAX_RETRIES do
+			local updateSuccess, updateResult = pcall(function()
+				return PlayerDataStore:UpdateAsync("User_V27_" .. player.UserId, function(oldData)
+					oldData = oldData or {}
+					
+					-- 🛡️ ANTI-DATA ROT: Inventory Filter
+					local finalInventory = inventory
+					if #inventory == 0 and (oldData.Inventory and #oldData.Inventory > 0) and not session.ExplicitClear then
+						warn("⚠️ Anti-Wipe (Inventory): Preserving for " .. player.Name)
+						finalInventory = {}
+						for _, oldId in pairs(oldData.Inventory) do
+							if CarTools:FindFirstChild(oldId) then table.insert(finalInventory, oldId) end
+						end
+					end
+					
+					-- 🛡️ ANTI-DATA ROT: Layout Filter + DEDUPLICATION
+					local finalLayout = layout
+					if #layout == 0 and (oldData.Layout and #oldData.Layout > 0) and not session.ExplicitClear then
+						warn("⚠️ Anti-Wipe (Layout): Preserving for " .. player.Name)
+						finalLayout = {}
+						local seenPads = {} 
+						for _, oldEntry in pairs(oldData.Layout) do
+							if FindModelNameFromTool(oldEntry.Tool) and not seenPads[oldEntry.Pad] then 
+								seenPads[oldEntry.Pad] = true
+								table.insert(finalLayout, oldEntry) 
+							end
+						end
+					end
+					
+					local stillRestored = player:GetAttribute("RestoredPending") or 0
+					local finalPending = stillRestored + currentPendingInTycoon
 
-				return {
-					Bank = MoneyManager.GetBalance(player, "Cash"),
-					Wallet = MoneyManager.GetBalance(player, "Wallet"),
-					ATMBalance = MoneyManager.GetBalance(player, "ATMBalance"),
-					Inventory = inventory,
-					Layout = layout,
-					PendingEarnings = finalPending,
-					LastUpdated = os.time(),
-					DataVersion = "V27_Optimized"
-				}
+					oldData.Bank = MoneyManager.GetBalance(player, "Cash")
+					oldData.Wallet = MoneyManager.GetBalance(player, "Wallet")
+					oldData.ATMBalance = MoneyManager.GetBalance(player, "ATMBalance")
+					oldData.Inventory = finalInventory
+					oldData.Layout = finalLayout
+					oldData.PendingEarnings = finalPending
+					oldData.LastUpdated = os.time()
+					oldData.DataVersion = "V35_Final"
+					
+					return oldData
+				end)
 			end)
-		end)
-		if success then break end
-		task.wait(0.35 * attempt)
+			
+			if updateSuccess and updateResult ~= nil then 
+				return true 
+			end
+			task.wait(0.35 * attempt)
+		end
+		
+		error("UpdateAsync failed after retries") 
 	end
 
-	-- [[ AUDIT FIX: ALWAYS FIRE EVENT ]]
-	local syncEvent = game.ServerStorage:FindFirstChild("TycoonSaveCompleted")
+	-- Run the save safely
+	local ok, err = pcall(executeSave)
 
-	if success then
-		session.LastSave = os.time()
-		session.IsDirty = false
-		if syncEvent then syncEvent:Fire(player.Name) end -- ✅ Fire on Success
-		if isClosing then print("✅ Saved: " .. player.Name) end
-	else
+	if not ok then
 		warn("❌ Save Failed " .. player.Name .. ": " .. tostring(err))
-		if syncEvent then syncEvent:Fire(player.Name) end -- ✅ Fire on Fail (Releases Lock)
+	else
+		if isClosing then print("✅ Saved: " .. player.Name) end
 	end
+
+	session.IsSaving = false -- 🔓 UNLOCK GUARANTEED (Runs after pcall)
+
+	local syncEvent = game.ServerStorage:FindFirstChild("TycoonSaveCompleted")
+	if syncEvent then syncEvent:Fire(player.Name) end
 end
 
 -- ----------------------------------------------------------------------------
 -- 🔄 INIT & LOOPS
 -- ----------------------------------------------------------------------------
 local function InitializePlayer(player)
-	SessionData[player] = { LastSave = os.time(), IsDirty = false, DataLoaded = false }
+	SessionData[player] = { 
+		LastSave = os.time(), 
+		IsDirty = false, 
+		DataLoaded = false, 
+		ExplicitClear = false, 
+		IsSaving = false       
+	}
+	
 	local ls = Instance.new("Folder"); ls.Name = "leaderstats"; ls.Parent = player
 	local cash = Instance.new("IntValue"); cash.Name = "Cash"; cash.Parent = ls
 	local wallet = Instance.new("IntValue"); wallet.Name = "Wallet"; wallet.Parent = ls
@@ -401,15 +492,6 @@ local function InitializePlayer(player)
 	local function setDirty() markDirty(player) end
 	cash.Changed:Connect(setDirty); wallet.Changed:Connect(setDirty); atm.Changed:Connect(setDirty)
 	
-	-- ✅ USER REQUEST: Mark Dirty on Backpack Changes
-	-- This ensures that if a player interacts with their current inventory, the game knows to save.
-	local backpack = player:WaitForChild("Backpack", 10)
-	if backpack then
-		backpack.ChildAdded:Connect(setDirty)
-		backpack.ChildRemoved:Connect(setDirty)
-	end
-	
-	-- We also keep StarterGear dirty tracking since that is what we are saving.
 	local gear = player:WaitForChild("StarterGear", 10)
 	if gear then gear.ChildAdded:Connect(setDirty); gear.ChildRemoved:Connect(setDirty) end
 
@@ -458,19 +540,27 @@ local function InitializePlayer(player)
 		end)
 	end
 
-	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(function()
+	local function CheckAndRestorePending()
 		local plotName = player:GetAttribute("OccupiedPlot")
 		local amount = player:GetAttribute("RestoredPending")
+		
 		if plotName and amount and amount > 0 then
 			local plot = TycoonFolder:FindFirstChild(plotName)
-			local pendingVal = plot and plot:WaitForChild("PendingEarnings", 10)
-			if pendingVal then
-				player:SetAttribute("RestoredPending", 0)
-				pendingVal.Value = pendingVal.Value + amount
-				markDirty(player)
+			if plot then
+				local pendingVal = plot:WaitForChild("PendingEarnings", 10)
+				if pendingVal then
+					player:SetAttribute("RestoredPending", 0) 
+					pendingVal.Value = pendingVal.Value + amount
+					markDirty(player)
+					print("✅ RESTORED PENDING: $" .. amount .. " to " .. plot.Name)
+				end
 			end
 		end
-	end)
+	end
+
+	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(CheckAndRestorePending)
+	CheckAndRestorePending() 
+
 	SessionData[player].DataLoaded = true
 end
 
