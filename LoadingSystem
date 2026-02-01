@@ -1,4 +1,5 @@
--- AESTHETIC + FUNCTIONAL LOADING SCREEN (Camera Part Ready + Real Preload + Fade + Blur + No Movement)
+-- FINAL: Functional Loading Screen
+-- Camera Part Ready + Real Preload + Fade + Blur + No Movement + Hide ALL other UI contents (no ScreenGui.Enabled toggles)
 -- Runs on: Client (ReplicatedFirst)
 
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
@@ -17,7 +18,7 @@ ReplicatedFirst:RemoveDefaultLoadingScreen()
 -- =====================
 -- CONFIG
 -- =====================
-local VIEW_PART_NAME = "LoadingViewPart" -- Workspace part that camera should lock to
+local VIEW_PART_NAME = "LoadingViewPart"
 local VIEW_PART_TIMEOUT = 20
 
 local LOCK_NAME = "LoadingScreenCameraLock"
@@ -30,7 +31,6 @@ local BLUR_SIZE = 20
 local BLUR_IN_TIME = 0.5
 local BLUR_OUT_TIME = 0.5
 
--- IMPORTANT: extra hold time requested (+3 seconds)
 local EXTRA_HOLD_SECONDS = 3.0
 
 -- Progress ranges per phase
@@ -41,6 +41,12 @@ local PHASE_FINISH_TO = 1.00
 
 -- Optional: put Instances you want preloaded inside ReplicatedStorage.PreloadAssets (Folder)
 local PRELOAD_FOLDER_NAME = "PreloadAssets"
+
+-- If you want some UI to still show during loading, whitelist its ScreenGui name here.
+-- (We’ll still hide everything else.)
+local SCREEN_GUI_WHITELIST = {
+	ActiveLoadingScreen = true,
+}
 
 -- =====================
 -- BASICS
@@ -111,13 +117,9 @@ local movementLock = {
 local function applyMovementLockToCharacter(char)
 	if not movementLock.active or not char then return end
 
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if not hum then
-		hum = char:WaitForChild("Humanoid", 5)
-	end
+	local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
 	if not hum then return end
 
-	-- Save originals once per humanoid
 	if not movementLock.original[hum] then
 		movementLock.original[hum] = {
 			WalkSpeed = hum.WalkSpeed,
@@ -127,20 +129,17 @@ local function applyMovementLockToCharacter(char)
 		}
 	end
 
-	-- Hard lock movement
 	hum.WalkSpeed = 0
 	hum.JumpPower = 0
 	hum.JumpHeight = 0
 	hum.AutoRotate = false
 
-	-- Stop any residual drift
 	local root = char:FindFirstChild("HumanoidRootPart")
 	if root then
 		root.AssemblyLinearVelocity = Vector3.zero
 		root.AssemblyAngularVelocity = Vector3.zero
 	end
 
-	-- In case something tries to force a move:
 	pcall(function()
 		hum:Move(Vector3.zero, true)
 	end)
@@ -148,14 +147,9 @@ end
 
 local function enableMovementLock()
 	movementLock.active = true
-
-	-- Apply to current character
-	local char = player.Character
-	if char then
-		applyMovementLockToCharacter(char)
+	if player.Character then
+		applyMovementLockToCharacter(player.Character)
 	end
-
-	-- Re-apply on respawn during loading
 	movementLock.charConn = player.CharacterAdded:Connect(function(newChar)
 		applyMovementLockToCharacter(newChar)
 	end)
@@ -168,7 +162,6 @@ local function disableMovementLock()
 		movementLock.charConn = nil
 	end
 
-	-- Restore on current humanoid (and any we captured)
 	for hum, original in pairs(movementLock.original) do
 		if hum and hum.Parent then
 			hum.WalkSpeed = original.WalkSpeed or 16
@@ -212,6 +205,105 @@ local function unlockCameraToPlayer()
 end
 
 -- =====================
+-- HIDE ALL OTHER UI CONTENTS (Future-proof, avoids ScreenGui.Enabled toggles)
+-- =====================
+local uiHide = {
+	active = false,
+	connAdded = nil,
+	-- originalState[GuiObject] = {Visible=bool, Active=bool}
+	originalState = {},
+	hiddenObjects = {}, -- array of GuiObjects we manage
+	enforceThread = nil,
+}
+
+local function shouldManageScreenGui(screenGui, loadingGui)
+	if screenGui == loadingGui then return false end
+	if SCREEN_GUI_WHITELIST[screenGui.Name] then return false end
+	return true
+end
+
+local function captureAndHideGuiObject(obj)
+	if not obj:IsA("GuiObject") then return end
+
+	-- Store original once
+	if uiHide.originalState[obj] == nil then
+		uiHide.originalState[obj] = {
+			Visible = obj.Visible,
+			Active = obj.Active,
+		}
+		table.insert(uiHide.hiddenObjects, obj)
+	end
+
+	-- Hide + disable input
+	obj.Visible = false
+	obj.Active = false
+end
+
+local function hideAllOtherUiContents(loadingGui)
+	for _, child in ipairs(playerGui:GetChildren()) do
+		if child:IsA("ScreenGui") and shouldManageScreenGui(child, loadingGui) then
+			for _, d in ipairs(child:GetDescendants()) do
+				captureAndHideGuiObject(d)
+			end
+		end
+	end
+end
+
+local function beginHideOtherUiContents(loadingGui)
+	uiHide.active = true
+	hideAllOtherUiContents(loadingGui)
+
+	-- Hide any UI added during loading (future-proof)
+	uiHide.connAdded = playerGui.DescendantAdded:Connect(function(desc)
+		if not uiHide.active then return end
+
+		-- Only manage descendants that belong to non-whitelisted ScreenGuis
+		local sg = desc:FindFirstAncestorOfClass("ScreenGui")
+		if sg and shouldManageScreenGui(sg, loadingGui) then
+			captureAndHideGuiObject(desc)
+		end
+	end)
+
+	-- Enforce in case some other script tries to make things visible during loading
+	uiHide.enforceThread = task.spawn(function()
+		while uiHide.active do
+			for i = #uiHide.hiddenObjects, 1, -1 do
+				local obj = uiHide.hiddenObjects[i]
+				if not obj or not obj.Parent then
+					uiHide.hiddenObjects[i] = uiHide.hiddenObjects[#uiHide.hiddenObjects]
+					uiHide.hiddenObjects[#uiHide.hiddenObjects] = nil
+				else
+					-- Keep it hidden during loading no matter what
+					if obj.Visible ~= false then obj.Visible = false end
+					if obj.Active ~= false then obj.Active = false end
+				end
+			end
+			task.wait(0.15)
+		end
+	end)
+end
+
+local function restoreOtherUiContents()
+	uiHide.active = false
+
+	if uiHide.connAdded then
+		uiHide.connAdded:Disconnect()
+		uiHide.connAdded = nil
+	end
+
+	-- Restore original Visible/Active for everything we touched
+	for obj, state in pairs(uiHide.originalState) do
+		if obj and obj.Parent then
+			obj.Visible = state.Visible
+			obj.Active = state.Active
+		end
+	end
+
+	table.clear(uiHide.originalState)
+	table.clear(uiHide.hiddenObjects)
+end
+
+-- =====================
 -- UI SETUP
 -- =====================
 local sourceGui = StarterGui:WaitForChild("LoadingScreenGui", 10)
@@ -223,12 +315,17 @@ end
 local loadingGui = sourceGui:Clone()
 loadingGui.Name = "ActiveLoadingScreen"
 loadingGui.ResetOnSpawn = false
-loadingGui.Enabled = true -- Show immediately to prevent world flash
+loadingGui.Enabled = true
 loadingGui.Parent = playerGui
+SCREEN_GUI_WHITELIST[loadingGui.Name] = true
+
+-- Hide other UI contents immediately (prevents auto-open side effects from Enabled toggles)
+beginHideOtherUiContents(loadingGui)
 
 local bgFrame = loadingGui:WaitForChild("Frame", 5)
 if not bgFrame then
 	warn("❌ CRITICAL: Frame missing inside LoadingScreenGui!")
+	restoreOtherUiContents()
 	loadingGui:Destroy()
 	return
 end
@@ -240,19 +337,17 @@ local progressText = barContainer and barContainer:FindFirstChild("ProgressText"
 
 if not barFill then
 	warn("❌ CRITICAL: ProgressBar missing.")
+	restoreOtherUiContents()
 	loadingGui:Destroy()
 	return
 end
 
--- Save designed size
 local MAX_X_SCALE = barFill.Size.X.Scale
 local MAX_X_OFFSET = barFill.Size.X.Offset
 local Y_SCALE = barFill.Size.Y.Scale
 local Y_OFFSET = barFill.Size.Y.Offset
-
 barFill.Size = UDim2.new(0, 0, Y_SCALE, Y_OFFSET)
 
--- Smooth progress driver
 local progressValue = Instance.new("NumberValue")
 progressValue.Value = 0
 progressValue.Changed:Connect(function(v)
@@ -271,7 +366,7 @@ local function tweenProgress(toValue, duration, easingStyle, easingDir)
 end
 
 -- =====================
--- FADE SYSTEM (uses Studio design transparencies)
+-- FADE SYSTEM (Studio transparencies)
 -- =====================
 local studio = {} -- [Instance] = {props...}
 
@@ -347,7 +442,6 @@ local function fadeToInvisible(duration)
 	end
 end
 
--- Capture studio props and start invisible (so fade-in happens after camera lock)
 for _, inst in ipairs(loadingGui:GetDescendants()) do
 	recordStudioProps(inst)
 end
@@ -359,8 +453,7 @@ end
 -- PRELOAD LIST BUILDER
 -- =====================
 local function buildPreloadList(viewPart)
-	local list = {}
-	table.insert(list, loadingGui)
+	local list = { loadingGui }
 
 	local folder = ReplicatedStorage:FindFirstChild(PRELOAD_FOLDER_NAME)
 	if folder then
@@ -388,18 +481,21 @@ task.spawn(function()
 		unlockControls()
 		disableMovementLock()
 		unlockCameraToPlayer()
+		restoreOtherUiContents()
+
 		pcall(function()
 			if blur and blur.Parent then
 				blur.Size = 0
 				blur:Destroy()
 			end
 		end)
+
 		pcall(function() loadingGui:Destroy() end)
 		pcall(function() progressValue:Destroy() end)
 	end
 
 	local ok, err = xpcall(function()
-		-- Lock everything immediately (no movement before loaded)
+		-- Lock everything immediately: no movement + no clicks
 		lockControls()
 		enableMovementLock()
 
@@ -412,7 +508,7 @@ task.spawn(function()
 			RunService.Heartbeat:Wait()
 		end
 
-		-- Phase 2: wait for view part, preload it, then lock camera to it
+		-- Phase 2: wait for view part, preload it, lock camera
 		local viewPart = waitForNamedChild(Workspace, VIEW_PART_NAME, VIEW_PART_TIMEOUT)
 		if not viewPart then
 			warn(("⚠️ %s not found in Workspace within %ds. Camera will not lock."):format(VIEW_PART_NAME, VIEW_PART_TIMEOUT))
@@ -425,11 +521,11 @@ task.spawn(function()
 
 		tweenProgress(PHASE_VIEWPART_READY_TO, 0.25)
 
-		-- Fade in UI now that camera is locked (if available)
+		-- Fade in UI after camera lock
 		fadeToStudio(FADE_IN_TIME)
 		task.wait(FADE_IN_TIME)
 
-		-- Phase 3: real preloading of assets list
+		-- Phase 3: real preloading (future-proof list)
 		local preloadList = buildPreloadList(viewPart)
 		local total = #preloadList
 
@@ -442,7 +538,6 @@ task.spawn(function()
 				end)
 				local alpha = i / total
 				local target = PHASE_VIEWPART_READY_TO + (PHASE_PRELOAD_TO - PHASE_VIEWPART_READY_TO) * alpha
-				-- Ensure progress never goes backwards
 				progressValue.Value = math.max(progressValue.Value, target)
 				RunService.Heartbeat:Wait()
 			end
@@ -452,7 +547,7 @@ task.spawn(function()
 		tweenProgress(PHASE_FINISH_TO, 0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 		task.wait(0.45)
 
-		-- EXTRA HOLD (+3 seconds requested) — still locked, still no movement
+		-- Extra hold (+3 seconds)
 		task.wait(EXTRA_HOLD_SECONDS)
 
 		-- Fade out + blur out
@@ -460,14 +555,16 @@ task.spawn(function()
 		blurTo(0, BLUR_OUT_TIME)
 		task.wait(FADE_OUT_TIME)
 
-		-- Cleanup + restore
+		-- Restore camera + allow movement ONLY after fully done
 		pcall(function() RunService:UnbindFromRenderStep(LOCK_NAME) end)
-
-		-- IMPORTANT: allow movement ONLY AFTER everything finished
 		unlockControls()
 		disableMovementLock()
 		unlockCameraToPlayer()
 
+		-- Restore all other UI exactly how it was before loading
+		restoreOtherUiContents()
+
+		-- Final cleanup
 		loadingGui.Enabled = false
 		loadingGui:Destroy()
 		progressValue:Destroy()
@@ -482,4 +579,5 @@ task.spawn(function()
 		hardCleanup()
 	end
 end)
+
 
