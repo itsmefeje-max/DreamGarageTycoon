@@ -21,9 +21,24 @@ local SFX_MAP = {
 	},
 	Hover = "rbxassetid://6895079853",
 	Click = "rbxassetid://9083627113",
+
+	-- ✅ CAR PURCHASE (Cash/Robux Car)
 	BuySuccess = "rbxassetid://140072726814802",
-	BuyFail = "rbxassetid://3779045779",
-	PaidReroll = "rbxassetid://140072726814802", 
+
+	-- ❌ FAIL SOUND
+	BuyFail = "rbxassetid://83517496538471",
+
+	-- 🔄 PAID REROLL (Now fully controllable!)
+	-- I changed this to a table so you can tweak Pitch/Volume specifically for this.
+	PaidReroll = {
+		{ 
+			Id = "rbxassetid://140072726814802", -- ⬅️ REPLACE THIS WITH YOUR UNIQUE REROLL SOUND ID
+			Vol = 1.0,    -- Louder?
+			Pitch = 4.0 ,  -- Higher pitch (Makes it sound faster/different)
+			Var = 0.     -- Slight random variation
+		}
+	}, 
+
 	AutoRestock = "rbxassetid://134952684776633"
 }
 
