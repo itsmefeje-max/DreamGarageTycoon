@@ -1,0 +1,96 @@
+-- [[ LOCAL SCRIPT: LoadingSystem ]]
+-- Purpose: Handles Camera Lock, Blur, Asset Preloading, and Intro Transition
+-- Location: ReplicatedFirst
+
+local Players = game:GetService("Players")
+local ReplicatedFirst = game:GetService("ReplicatedFirst")
+local ContentProvider = game:GetService("ContentProvider")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+-- 1. REMOVE DEFAULT LOADING SCREEN
+ReplicatedFirst:RemoveDefaultLoadingScreen()
+
+-- 2. SETUP REFERENCES
+local loadingGui = player.PlayerGui:WaitForChild("LoadingScreenGui") -- Waits for your UI
+local bgFrame = loadingGui:WaitForChild("Frame")
+local logo = bgFrame:WaitForChild("ImageLabel")
+local viewPart = Workspace:WaitForChild("LoadingViewPart", 10) -- The part you made in Step 1
+
+-- 3. SETUP BLUR (Reusing logic from LocalShopController)
+local blur = Instance.new("BlurEffect")
+blur.Name = "LoadingBlur"
+blur.Size = 24 -- Matches your shop blur size
+blur.Parent = Lighting
+
+-- 4. LOCK CAMERA (Reusing logic from AfraiC4tLogic)
+if viewPart then
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = viewPart.CFrame
+else
+	warn("⚠️ LoadingViewPart not found! Camera might be default.")
+end
+
+-- ============================================================================
+-- 📦 ASSET PRELOADING
+-- ============================================================================
+-- We will preload your heavy assets so they don't pop in later.
+local assetsToLoad = {}
+
+-- A. Load Car Images from CarStats
+-- We require the module to get the list of image IDs
+local success, CarStats = pcall(function() return require(ReplicatedStorage:WaitForChild("CarStats")) end)
+if success and CarStats.Cars then
+	for _, carData in pairs(CarStats.Cars) do
+		if carData.Image then
+			table.insert(assetsToLoad, carData.Image)
+		end
+	end
+end
+
+-- B. Load Music from Playlist
+table.insert(assetsToLoad, "rbxassetid://1842150151")
+table.insert(assetsToLoad, "rbxassetid://1836009208")
+-- Add the rest of your playlist IDs here...
+
+-- C. Load the View Part itself (to ensure the map looks okay)
+if viewPart then table.insert(assetsToLoad, viewPart) end
+
+print("⏳ Loading " .. #assetsToLoad .. " assets...")
+
+-- 5. PERFORM LOADING
+-- This freezes the script here until these specific assets are downloaded
+ContentProvider:PreloadAsync(assetsToLoad)
+
+-- Optional: Wait a minimum time so they can admire your logo (e.g., 3 seconds)
+task.wait(3)
+
+print("✅ Loading Complete!")
+
+-- ============================================================================
+-- ✨ TRANSITION OUT
+-- ============================================================================
+
+-- A. Fade out Logo
+TweenService:Create(logo, TweenInfo.new(1), {ImageTransparency = 1}):Play()
+
+-- B. Fade out Background
+local fadeTween = TweenService:Create(bgFrame, TweenInfo.new(1), {BackgroundTransparency = 1})
+fadeTween:Play()
+
+-- C. Remove Blur Smoothly
+TweenService:Create(blur, TweenInfo.new(1.5), {Size = 0}):Play()
+
+fadeTween.Completed:Wait()
+
+-- D. Cleanup
+loadingGui:Destroy()
+blur:Destroy()
+
+-- E. Return Camera to Player
+camera.CameraType = Enum.CameraType.Custom
