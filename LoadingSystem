@@ -1,96 +1,221 @@
--- [[ LOCAL SCRIPT: LoadingSystem ]]
--- Purpose: Handles Camera Lock, Blur, Asset Preloading, and Intro Transition
--- Location: ReplicatedFirst
+-- Purpose: Loading Screen (Fade IN -> Load -> Fade OUT)
+-- Runs on: Client (ReplicatedFirst)
+-- Location: ReplicatedFirst > LoadingSystem
 
-local Players = game:GetService("Players")
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
-local ContentProvider = game:GetService("ContentProvider")
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local Lighting = game:GetService("Lighting")
+local ContentProvider = game:GetService("ContentProvider")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local player = Players.LocalPlayer
-local camera = Workspace.CurrentCamera
-
--- 1. REMOVE DEFAULT LOADING SCREEN
+-- 1. Remove default spinner immediately
 ReplicatedFirst:RemoveDefaultLoadingScreen()
 
--- 2. SETUP REFERENCES
-local loadingGui = player.PlayerGui:WaitForChild("LoadingScreenGui") -- Waits for your UI
-local bgFrame = loadingGui:WaitForChild("Frame")
-local logo = bgFrame:WaitForChild("ImageLabel")
-local viewPart = Workspace:WaitForChild("LoadingViewPart", 10) -- The part you made in Step 1
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera")
 
--- 3. SETUP BLUR (Reusing logic from LocalShopController)
-local blur = Instance.new("BlurEffect")
-blur.Name = "LoadingBlur"
-blur.Size = 24 -- Matches your shop blur size
-blur.Parent = Lighting
+-- =========================================================
+-- 🔒 Controls Lock
+-- =========================================================
+local function SetControlsEnabled(isEnabled: boolean)
+	task.spawn(function()
+		local playerScripts = player:WaitForChild("PlayerScripts", 10)
+		if not playerScripts then return end
+		local playerModuleScript = playerScripts:WaitForChild("PlayerModule", 10)
+		if not playerModuleScript then return end
 
--- 4. LOCK CAMERA (Reusing logic from AfraiC4tLogic)
-if viewPart then
-	camera.CameraType = Enum.CameraType.Scriptable
-	camera.CFrame = viewPart.CFrame
-else
-	warn("⚠️ LoadingViewPart not found! Camera might be default.")
+		local ok, PlayerModule = pcall(require, playerModuleScript)
+		if ok and PlayerModule then
+			local controls = PlayerModule:GetControls()
+			if controls then
+				if isEnabled then controls:Enable() else controls:Disable() end
+			end
+		end
+	end)
 end
 
--- ============================================================================
--- 📦 ASSET PRELOADING
--- ============================================================================
--- We will preload your heavy assets so they don't pop in later.
-local assetsToLoad = {}
+SetControlsEnabled(false)
 
--- A. Load Car Images from CarStats
--- We require the module to get the list of image IDs
-local success, CarStats = pcall(function() return require(ReplicatedStorage:WaitForChild("CarStats")) end)
-if success and CarStats.Cars then
-	for _, carData in pairs(CarStats.Cars) do
-		if carData.Image then
-			table.insert(assetsToLoad, carData.Image)
+-- =========================================================
+-- 🖼️ UI Setup
+-- =========================================================
+local loadingGui = playerGui:WaitForChild("LoadingScreenGui", 30)
+if not loadingGui then SetControlsEnabled(true) return end
+
+local bgFrame = loadingGui:WaitForChild("Frame", 10)
+local barContainer = bgFrame and bgFrame:WaitForChild("ProgressBarContainer", 10)
+local barFill = barContainer and barContainer:WaitForChild("ProgressBar", 10)
+local progressText = barContainer and barContainer:WaitForChild("ProgressText", 10)
+
+if not barFill or not progressText then
+	warn("LoadingSystem: Critical UI elements missing.")
+	SetControlsEnabled(true)
+	return
+end
+
+-- 📏 CRITICAL FIX: Snapshot Studio Size (The "100%")
+local MAX_SIZE = barFill.Size 
+-- Reset bar to 0 width immediately
+barFill.Size = UDim2.new(0, 0, MAX_SIZE.Y.Scale, MAX_SIZE.Y.Offset)
+
+-- =========================================================
+-- ✨ Fade In Logic (Prepare)
+-- =========================================================
+-- We store the original transparency of every part of your UI
+-- so we can fade them back in correctly (even if they were semi-transparent).
+local fadeTargets = {} 
+
+local function PrepareFadeIn()
+	local function captureAndHide(guiObject)
+		if not guiObject:IsA("GuiObject") then return end
+
+		local propsToRestore = {}
+		local modified = false
+
+		-- Background
+		if guiObject.BackgroundTransparency < 1 then
+			propsToRestore.BackgroundTransparency = guiObject.BackgroundTransparency
+			guiObject.BackgroundTransparency = 1 -- Hide now
+			modified = true
 		end
+
+		-- Text
+		if guiObject:IsA("TextLabel") or guiObject:IsA("TextButton") or guiObject:IsA("TextBox") then
+			if guiObject.TextTransparency < 1 then
+				propsToRestore.TextTransparency = guiObject.TextTransparency
+				guiObject.TextTransparency = 1 -- Hide now
+				modified = true
+			end
+		end
+
+		-- Images
+		if guiObject:IsA("ImageLabel") or guiObject:IsA("ImageButton") then
+			if guiObject.ImageTransparency < 1 then
+				propsToRestore.ImageTransparency = guiObject.ImageTransparency
+				guiObject.ImageTransparency = 1 -- Hide now
+				modified = true
+			end
+		end
+
+		if modified then
+			fadeTargets[guiObject] = propsToRestore
+		end
+	end
+
+	-- Capture main frame and all children
+	captureAndHide(bgFrame)
+	for _, child in pairs(bgFrame:GetDescendants()) do
+		captureAndHide(child)
 	end
 end
 
--- B. Load Music from Playlist
-table.insert(assetsToLoad, "rbxassetid://1842150151")
-table.insert(assetsToLoad, "rbxassetid://1836009208")
--- Add the rest of your playlist IDs here...
+-- Call this IMMEDIATELY to hide the UI before the player sees it
+PrepareFadeIn()
 
--- C. Load the View Part itself (to ensure the map looks okay)
-if viewPart then table.insert(assetsToLoad, viewPart) end
+-- =========================================================
+-- 📷 Camera Lock
+-- =========================================================
+local viewPart = Workspace:WaitForChild("LoadingViewPart", 5)
+if viewPart then
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = viewPart.CFrame
+end
 
-print("⏳ Loading " .. #assetsToLoad .. " assets...")
+-- =========================================================
+-- 📊 Update Function
+-- =========================================================
+local function UpdateProgress(done: number, total: number)
+	local pct = 0
+	if total > 0 then pct = done / total end
+	pct = math.clamp(pct, 0, 1)
 
--- 5. PERFORM LOADING
--- This freezes the script here until these specific assets are downloaded
-ContentProvider:PreloadAsync(assetsToLoad)
+	progressText.Text = math.floor(pct * 100) .. "%"
 
--- Optional: Wait a minimum time so they can admire your logo (e.g., 3 seconds)
-task.wait(3)
+	local targetWidthScale = MAX_SIZE.X.Scale * pct
+	local targetWidthOffset = MAX_SIZE.X.Offset * pct
 
-print("✅ Loading Complete!")
+	TweenService:Create(barFill, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {
+		Size = UDim2.new(targetWidthScale, targetWidthOffset, MAX_SIZE.Y.Scale, MAX_SIZE.Y.Offset)
+	}):Play()
+end
 
--- ============================================================================
--- ✨ TRANSITION OUT
--- ============================================================================
+-- =========================================================
+-- ✨ Fade Operations
+-- =========================================================
+local function PlayFadeIn()
+	local info = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	for obj, props in pairs(fadeTargets) do
+		TweenService:Create(obj, info, props):Play()
+	end
+	task.wait(0.8) -- Wait for fade to finish
+end
 
--- A. Fade out Logo
-TweenService:Create(logo, TweenInfo.new(1), {ImageTransparency = 1}):Play()
+local function PlayFadeOut()
+	local info = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- B. Fade out Background
-local fadeTween = TweenService:Create(bgFrame, TweenInfo.new(1), {BackgroundTransparency = 1})
-fadeTween:Play()
+	-- We just fade everything to transparency 1
+	local function fadeOutObj(obj)
+		local props = {}
+		props.BackgroundTransparency = 1
+		if obj:IsA("TextLabel") or obj:IsA("TextButton") then props.TextTransparency = 1 end
+		if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then props.ImageTransparency = 1 end
+		TweenService:Create(obj, info, props):Play()
+	end
 
--- C. Remove Blur Smoothly
-TweenService:Create(blur, TweenInfo.new(1.5), {Size = 0}):Play()
+	fadeOutObj(bgFrame)
+	for _, child in pairs(bgFrame:GetDescendants()) do
+		if child:IsA("GuiObject") then fadeOutObj(child) end
+	end
 
-fadeTween.Completed:Wait()
+	task.wait(0.8)
+end
 
--- D. Cleanup
-loadingGui:Destroy()
-blur:Destroy()
+-- =========================================================
+-- 🚀 Main Execution
+-- =========================================================
+task.spawn(function()
+	-- 1. Start Fade In
+	PlayFadeIn()
 
--- E. Return Camera to Player
-camera.CameraType = Enum.CameraType.Custom
+	UpdateProgress(0, 1)
+
+	-- 2. Gather Assets
+	local assets = {}
+	local ok, CarStats = pcall(require, ReplicatedStorage:WaitForChild("CarStats", 5))
+	if ok and CarStats and CarStats.Cars then
+		for _, data in pairs(CarStats.Cars) do
+			if data.Image then table.insert(assets, data.Image) end
+		end
+	end
+	table.insert(assets, "rbxassetid://1842150151") 
+	if viewPart then table.insert(assets, viewPart) end
+
+	-- 3. Load Loop
+	local total = #assets
+	if total > 0 then
+		for i, asset in ipairs(assets) do
+			ContentProvider:PreloadAsync({asset})
+			UpdateProgress(i, total)
+			if i % 5 == 0 then task.wait() end
+		end
+	else
+		task.wait(1) 
+	end
+
+	-- 4. Finish
+	UpdateProgress(1, 1)
+	task.wait(1) -- Hold at 100% for a moment
+
+	-- 5. Fade Out & Cleanup
+	PlayFadeOut()
+
+	SetControlsEnabled(true)
+	if player.Character then
+		camera.CameraSubject = player.Character:FindFirstChild("Humanoid")
+	end
+	camera.CameraType = Enum.CameraType.Custom
+
+	loadingGui:Destroy()
+end)
