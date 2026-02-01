@@ -1,5 +1,8 @@
 -- [[ SERVER SCRIPT: TycoonHandler (Senior Sync Fix) ]]
--- [[ FIXES: Data Loss Race Condition (Event-Based Locking) ]]
+-- -- Purpose: Manages plot assignment, wiping, and safe releasing on leave.
+-- -- Runs on: Server
+-- -- Location: ServerScriptService
+-- -- FIXES: Data Loss Race Condition (Event-Based Locking)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -91,7 +94,8 @@ Players.PlayerRemoving:Connect(function(player)
 		if plot and plot:FindFirstChild("Owner") then
 
 			print("🔒 Locking " .. plotName .. " until data saves...")
-			plot.Owner.Value = "" -- Visually release, but logically hold the plot
+			-- ⚠️ CRITICAL FIX: DO NOT clear Owner yet. 
+			-- Clearing it now allows a new player to claim/wipe it while data is still saving!
 
 			-- ⏳ EVENT LISTENER (The Senior Fix)
 			-- Instead of guessing 4 seconds, we wait for the EXACT moment data is saved.
@@ -114,8 +118,12 @@ Players.PlayerRemoving:Connect(function(player)
 
 			if listener then listener:Disconnect() end
 
+			-- ✅ NOW we safely release the plot
+			plot.Owner.Value = ""
+			print("🔓 Released " .. plotName)
+
 			if didSave then
-				print("✅ Data Saved for " .. player.Name .. ". Releasing " .. plotName .. " immediately.")
+				print("✅ Data Saved for " .. player.Name .. ". Plot released safely.")
 			else
 				warn("⚠️ Save Timeout for " .. player.Name .. ". Forcing release of " .. plotName .. " (Data might be risky).")
 			end
