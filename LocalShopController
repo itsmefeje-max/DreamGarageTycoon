@@ -1,14 +1,14 @@
 -- [[ LOCAL SCRIPT: LocalShopController ]]
--- UPDATED: Added "Focus Mode" (Hide UI + Blur) to match Bank/Inventory style.
--- STATUS: Production Ready
+-- UPDATED: Correctly excludes "Balance Indicator" so cash stays visible.
+-- PURPOSE: Manages the Car Shop UI, Purchases, and Focus Mode.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
-local Lighting = game:GetService("Lighting") -- ✅ Added for Blur
-local TweenService = game:GetService("TweenService") -- ✅ Added for Animation
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
@@ -26,7 +26,7 @@ local Kit = require(ReplicatedStorage:WaitForChild("ShopFrontendKit"))
 local REROLL_PRODUCT_ID = 3520990584 
 local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
 local SPECIAL_SFX_ID = "rbxassetid://140072726814802" 
-local BLUR_SIZE = 24 -- ✅ Strength of the blur effect
+local BLUR_SIZE = 24 
 
 -- 🔴 ROBUX IDS
 local ROBUX_PRODUCTS = {
@@ -49,8 +49,8 @@ local FuncBuyCar = Remotes:WaitForChild("BuyLocalCar")
 local currentState = nil
 local purchaseDebounce = {} 
 local isProcessingPurchase = false 
-local hiddenGuis = {} -- ✅ Tracks what we hid
-local currentBlur = nil -- ✅ Tracks the blur object
+local hiddenGuis = {} 
+local currentBlur = nil 
 
 -- 🛑 UI REFERENCES
 local function getUI()
@@ -59,12 +59,11 @@ local function getUI()
 end
 
 -- ============================================================================
--- 👁️ FOCUS MODE (BLUR + HIDE UI) - Matches Bank/Inventory Logic
+-- 👁️ FOCUS MODE (BLUR + HIDE UI)
 -- ============================================================================
 
 local function setBlur(enable)
 	if enable then
-		-- Create Blur
 		if not currentBlur then
 			currentBlur = Instance.new("BlurEffect")
 			currentBlur.Size = 0
@@ -73,7 +72,6 @@ local function setBlur(enable)
 		end
 		TweenService:Create(currentBlur, TweenInfo.new(0.5), {Size = BLUR_SIZE}):Play()
 	else
-		-- Destroy Blur
 		if currentBlur then
 			local t = TweenService:Create(currentBlur, TweenInfo.new(0.5), {Size = 0})
 			t:Play()
@@ -90,7 +88,12 @@ local function toggleOtherGuis(shouldHide)
 		-- Loop through all GUIs
 		for _, otherGui in pairs(PlayerGui:GetChildren()) do
 			-- Hide everything that is enabled, IS NOT the Shop, and is a ScreenGui
-			if otherGui:IsA("ScreenGui") and otherGui ~= gui and otherGui.Enabled == true then
+			-- ✅ THE FIX: We specifically skip "Balance Indicator" (Exact spelling from your image)
+			if otherGui:IsA("ScreenGui") 
+				and otherGui ~= gui 
+				and otherGui.Enabled == true 
+				and otherGui.Name ~= "Balance Indicator" then
+				
 				otherGui.Enabled = false
 				table.insert(hiddenGuis, otherGui)
 			end
@@ -110,7 +113,6 @@ local function setFocusMode(active)
 	setBlur(active)
 	toggleOtherGuis(active)
 	
-	-- Optional: Stop character movement when shop is open (Bank style)
 	local char = player.Character
 	if char and char:FindFirstChild("Humanoid") then
 		char.Humanoid.WalkSpeed = active and 0 or 16
@@ -130,7 +132,6 @@ local function RenderCard(card, carName, state)
 
 	if carImage and state.Image then carImage.Image = state.Image end
 
-	-- ✅ STOCK TEXT
 	if stockLabel then
 		stockLabel.Visible = true
 		if state.CanBuy then
@@ -142,7 +143,6 @@ local function RenderCard(card, carName, state)
 		end
 	end
 
-	-- 1. CASH BUTTON
 	if buyBtn then
 		if state.CanBuy then
 			buyBtn.Visible = true; buyBtn.Active = true
@@ -164,7 +164,6 @@ local function RenderCard(card, carName, state)
 		end
 	end
 
-	-- 2. ROBUX BUTTON
 	if robuxBtn then 
 		robuxBtn.Visible = state.CanRobux 
 		robuxBtn.Active = true 
@@ -232,16 +231,14 @@ local function init()
 		MarketplaceService:PromptProductPurchase(player, REROLL_PRODUCT_ID)
 	end)
 
-	-- ✅ CLOSE BUTTON LOGIC UPDATED
 	Kit.Tween:SetupButton(closeBtn, function() 
-		setFocusMode(false) -- Restore UI and Remove Blur
+		setFocusMode(false) 
 		gui.Enabled = false 
 	end)
 
 	for _, carName in ipairs(SHOP_CARS) do
 		local card = scrollFrame:WaitForChild(carName, 5)
 		if card then
-			-- 🟢 WIGGLE SETUP
 			local specificImageName = carName .. "-Image"
 			local imageButton = card:FindFirstChild(specificImageName)
 			if not imageButton then imageButton = card:FindFirstChild("CarImage") end 
@@ -269,7 +266,6 @@ local function init()
 				end)
 			end
 
-			-- ✅ NO STOCK SFX
 			local noStockBtn = card:FindFirstChild("NoStockIndicator")
 			if noStockBtn then
 				Kit.Tween:SetupButton(noStockBtn)
@@ -277,7 +273,6 @@ local function init()
 		end
 	end
 
-	-- 🔊 1. ROBUX PURCHASE LISTENER
 	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
 		if userId ~= player.UserId or not isPurchased then return end
 		local isShopCar = false
@@ -308,13 +303,11 @@ local function init()
 		end
 	end)
 
-	-- ✅ OPEN SHOP LOGIC UPDATED
 	RemoteOpen.OnClientEvent:Connect(function()
-		setFocusMode(true) -- Hide other UI + Blur
+		setFocusMode(true) 
 		Kit.Sound:Play("Open")
 		gui.Enabled = true 
 
-		-- INSTANT LOAD
 		currentState = {Featured = {}, Stock = {}, StockLimit = {}, Purchased = {}}
 		UpdateDisplay(scrollFrame)
 
