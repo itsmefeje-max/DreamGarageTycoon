@@ -1,7 +1,6 @@
--- [[ SERVER SCRIPT: AdminCommands (V9 Universal Fix) ]]
--- FEATURES: Works on ALL Chat Systems, Smart Caching, Safe Flight
+-- [[ SERVER SCRIPT: AdminCommands (V10 - Secure Sync) ]]
+-- FEATURES: Syncs with TycoonDataHandler to bypass Anti-Wipe protection.
 -- LOCATION: ServerScriptService > Script
--- FIXED: 'ToolId' Attribute now uses Exact Case-Sensitive Names (Prevents Deletion by Security)
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -12,6 +11,7 @@ local RunService = game:GetService("RunService")
 local CarTools = ServerStorage:WaitForChild("CarTools") 
 local FlyScriptTemplate = ServerStorage:WaitForChild("FlyClient", 5) 
 
+-- ⚠️ SECURITY: Add your UserID here
 local ADMIN_USER_IDS = {
 	[5512860740] = true, -- Your ID
 }
@@ -25,12 +25,19 @@ local AdminDebounces = {}
 local ToolCache = nil
 math.randomseed(os.time()) 
 
+-- 🔗 API CONNECTION
+local TycoonAdminAPI = ServerStorage:WaitForChild("TycoonAdminAPI", 10)
+
 if IS_STUDIO then
 	print("⚠️ [AdminCommands]: Studio Mode - Everyone is Admin!")
 end
 
 if not FlyScriptTemplate then
 	warn("❌ CRITICAL: 'FlyClient' missing in ServerStorage!")
+end
+
+if not TycoonAdminAPI then
+	warn("❌ CRITICAL: 'TycoonAdminAPI' missing! /clear command will fail.")
 end
 
 -- ============================================================================
@@ -44,16 +51,6 @@ local function getCleanID(rawName)
 	return lower
 end
 
-local function getToolIDFromObject(tool)
-	-- ✅ FIX: Force normalize ID for internal checking
-	-- Even if the Attribute is Case-Sensitive (e.g. "Delta"), we return "delta"
-	-- so the Admin script correctly detects duplicates.
-	local id = tool:GetAttribute("ToolId")
-	if id then return getCleanID(id) end
-	return getCleanID(tool.Name)
-end
-
--- ✅ CACHE: Validates /give all performance
 local function getAllTools()
 	if ToolCache then return ToolCache end
 	local tools = {}
@@ -71,7 +68,11 @@ local function getOwnedSet(player)
 	local function scan(container)
 		if not container then return end
 		for _, t in pairs(container:GetChildren()) do
-			if t:IsA("Tool") then set[getToolIDFromObject(t)] = true end
+			if t:IsA("Tool") then 
+				-- Use the Attribute ID if available, otherwise name
+				local id = t:GetAttribute("ToolId") or t.Name
+				set[getCleanID(id)] = true 
+			end
 		end
 	end
 	scan(player:FindFirstChild("Backpack"))
@@ -80,17 +81,12 @@ local function getOwnedSet(player)
 	return set
 end
 
-local function countSetSize(set)
-	local count = 0
-	for _ in pairs(set) do count += 1 end
-	return count
-end
-
 local function tagIssued(tool, realID)
 	if not tool then return end
 	tool:SetAttribute("IssuedByServer", true)
 	tool:SetAttribute("IssuedAt", os.time())
-	tool:SetAttribute("ToolId", realID) -- ✅ USES EXACT NAME NOW
+	tool:SetAttribute("IssuedId", HttpService:GenerateGUID(false)) 
+	tool:SetAttribute("ToolId", realID) 
 	tool.CanBeDropped = false
 end
 
@@ -130,12 +126,6 @@ end
 
 local function setFlight(player, shouldFly)
 	if not player.Character then return end
-
-	-- ✅ SAFETY: Only warn, don't break if user forgot to make it a LocalScript
-	if shouldFly and FlyScriptTemplate and not FlyScriptTemplate:IsA("LocalScript") then
-		warn("⚠️ [Admin]: 'FlyClient' in ServerStorage should be a LocalScript!")
-	end
-
 	local old = player.Character:FindFirstChild("FlyClient")
 	if old then
 		player.Character:SetAttribute("ForceStopFly", true)
@@ -156,7 +146,7 @@ local function giveItem(player, tool, cleanID, optionalOwnedSet)
 	local backpack = player:WaitForChild("Backpack", 5)
 	if not backpack then return false end
 
-	-- Check duplicates using lowercase ID (Internal Logic)
+	-- Check duplicates
 	if optionalOwnedSet then
 		if optionalOwnedSet[cleanID] then return false end
 	else
@@ -165,12 +155,9 @@ local function giveItem(player, tool, cleanID, optionalOwnedSet)
 	end
 
 	local bpTool = tool:Clone()
-
-	-- ✅ FIX: Pass tool.Name (Exact Case) instead of cleanID (Lowercase)
-	-- This ensures TycoonDataHandler accepts the tool as valid.
 	tagIssued(bpTool, tool.Name) 
-
 	bpTool.Parent = backpack
+
 	local sg = player:FindFirstChild("StarterGear")
 	if sg then
 		local sgTool = tool:Clone()
@@ -180,31 +167,14 @@ local function giveItem(player, tool, cleanID, optionalOwnedSet)
 	return true
 end
 
-local function clearInventory(player, forceAll)
-	local function wipe(container)
-		if not container then return end
-		for _, item in pairs(container:GetChildren()) do
-			if item:IsA("Tool") then
-				if forceAll or item:GetAttribute("IssuedByServer") then
-					item:Destroy()
-				end
-			end
-		end
-	end
-	wipe(player:FindFirstChild("Backpack"))
-	wipe(player:FindFirstChild("StarterGear"))
-	if player.Character then wipe(player.Character) end
-end
-
 -- ============================================================================
--- 💬 CHAT HANDLER (UNIVERSAL - WORKS EVERYWHERE)
+-- 💬 CHAT HANDLER
 -- ============================================================================
 
 Players.PlayerAdded:Connect(function(player)
 	player.Chatted:Connect(function(message)
 		if not (IS_STUDIO or ADMIN_USER_IDS[player.UserId]) then return end
 
-		-- Debounce
 		local lastCmd = AdminDebounces[player.UserId] or 0
 		if (os.clock() - lastCmd) < CMD_DEBOUNCE then return end
 		AdminDebounces[player.UserId] = os.clock()
@@ -227,31 +197,14 @@ Players.PlayerAdded:Connect(function(player)
 				local allTools = getAllTools()
 				for _, t in pairs(targets) do
 					local ownedSet = getOwnedSet(t)
-					local currentCount = countSetSize(ownedSet)
-					local seenIDs = {}
-					local newToolsCount = 0
-
 					for _, tool in pairs(allTools) do
 						local id = getCleanID(tool.Name)
-						if not seenIDs[id] then
-							seenIDs[id] = true
-							if not ownedSet[id] then newToolsCount += 1 end
+						if not ownedSet[id] then
+							giveItem(t, tool, id, ownedSet)
+							ownedSet[id] = true
 						end
 					end
-
-					if (currentCount + newToolsCount) <= MAX_INVENTORY_SIZE then
-						local givenThisLoop = {}
-						for _, tool in pairs(allTools) do
-							local id = getCleanID(tool.Name)
-							if not givenThisLoop[id] then
-								givenThisLoop[id] = true
-								if giveItem(t, tool, id, ownedSet) then ownedSet[id] = true end
-							end
-						end
-						print("✅ [Admin] Given ALL to " .. t.Name)
-					else
-						warn("❌ [Admin] Inventory full for " .. t.Name)
-					end
+					print("✅ [Admin] Given ALL to " .. t.Name)
 				end
 				return
 			end
@@ -260,13 +213,10 @@ Players.PlayerAdded:Connect(function(player)
 			if tool then
 				local cleanID = getCleanID(tool.Name)
 				for _, t in pairs(targets) do
-					local ownedSet = getOwnedSet(t)
-					local currentCount = countSetSize(ownedSet)
-					if (not ownedSet[cleanID]) and (currentCount + 1 > MAX_INVENTORY_SIZE) then
-						warn("❌ [Admin] Inventory full for " .. t.Name)
-					else
-						giveItem(t, tool, cleanID, ownedSet)
+					if giveItem(t, tool, cleanID) then
 						print("✅ [Admin] Given " .. tool.Name .. " to " .. t.Name)
+					else
+						warn("⚠️ " .. t.Name .. " already has " .. tool.Name)
 					end
 				end
 			end
@@ -274,31 +224,25 @@ Players.PlayerAdded:Connect(function(player)
 			-- [[ /fly & /unfly ]]
 		elseif command == "/fly" then
 			local targets = getTargets(player, args[2])
-			for _, t in pairs(targets) do
-				setFlight(t, true)
-				print("✈️ Flight Enabled: " .. t.Name)
-			end
+			for _, t in pairs(targets) do setFlight(t, true) end
 
 		elseif command == "/unfly" then
 			local targets = getTargets(player, args[2])
-			for _, t in pairs(targets) do
-				setFlight(t, false)
-				print("🛑 Flight Disabled: " .. t.Name)
-			end
+			for _, t in pairs(targets) do setFlight(t, false) end
 
-			-- [[ /clear & /clearall ]]
-		elseif command == "/clear" then
+			-- [[ /clear & /clearall - FIXED ]]
+		elseif command == "/clear" or command == "/clearall" then
 			local targets = getTargets(player, args[2])
-			for _, t in pairs(targets) do
-				clearInventory(t, false)
-				print("🗑️ Cleared admin items: " .. t.Name)
-			end
-
-		elseif command == "/clearall" then
-			local targets = getTargets(player, args[2])
-			for _, t in pairs(targets) do
-				clearInventory(t, true)
-				print("⚠️ WIPED Inventory: " .. t.Name)
+			if TycoonAdminAPI then
+				for _, t in pairs(targets) do
+					-- ✅ THIS IS THE FIX:
+					-- We tell the DataHandler "ForceWipe". 
+					-- This clears the items AND sets the 'ExplicitClear' flag.
+					TycoonAdminAPI:Invoke("ForceWipe", t)
+					print("🗑️ SECURE CLEAR: " .. t.Name)
+				end
+			else
+				warn("❌ Cannot clear: API Missing")
 			end
 		end
 	end)
