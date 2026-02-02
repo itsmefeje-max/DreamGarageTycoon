@@ -1,8 +1,7 @@
-
 -- FINAL: Simple + Reliable Functional Loading Screen (Client, ReplicatedFirst)
 -- ✅ Camera Part Ready + Real Preload + Fade + Blur + No Movement
 -- ✅ Forces Loading Frame Visible = true at runtime (even if Studio sets it false)
--- ✅ Does NOT hide/disable other UI (no UI getting stuck hidden)
+-- ✅ Hides other ScreenGuis while loading, restores them after
 -- ✅ Failsafe timeout (never stuck loading)
 -- NOTE: Put this LocalScript in ReplicatedFirst. Put your LoadingScreenGui in StarterGui.
 
@@ -54,6 +53,7 @@ local PHASE_FINISH_TO = 1.00
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera")
+playerGui:SetAttribute("LoadingScreenActive", true)
 
 -- =====================
 -- UTIL
@@ -266,6 +266,51 @@ local function tweenProgress(toValue, duration)
 end
 
 -- =====================
+-- HIDE OTHER UI DURING LOADING
+-- =====================
+local guiState = {
+	active = false,
+	enabled = {}, -- [ScreenGui] = wasEnabled
+	conn = nil,
+}
+
+local function hideGui(gui)
+	if gui == loadingGui then return end
+	if gui:IsA("ScreenGui") then
+		if guiState.enabled[gui] == nil then
+			guiState.enabled[gui] = gui.Enabled
+		end
+		gui.Enabled = false
+	end
+end
+
+local function hideOtherUIs()
+	guiState.active = true
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		hideGui(gui)
+	end
+	guiState.conn = playerGui.ChildAdded:Connect(function(gui)
+		if guiState.active then
+			hideGui(gui)
+		end
+	end)
+end
+
+local function restoreOtherUIs()
+	guiState.active = false
+	if guiState.conn then
+		guiState.conn:Disconnect()
+		guiState.conn = nil
+	end
+	for gui, wasEnabled in pairs(guiState.enabled) do
+		if gui and gui.Parent and gui:IsA("ScreenGui") then
+			gui.Enabled = wasEnabled
+		end
+	end
+	table.clear(guiState.enabled)
+end
+
+-- =====================
 -- FADE SYSTEM (records original transparencies)
 -- =====================
 local studioProps = {} -- [Instance] = props
@@ -366,6 +411,8 @@ local function cleanup()
 	unlockControls()
 	disableMovementLock()
 	unlockCameraToPlayer()
+	restoreOtherUIs()
+	pcall(function() playerGui:SetAttribute("LoadingScreenActive", false) end)
 
 	pcall(function()
 		if blur and blur.Parent then
@@ -395,6 +442,7 @@ task.spawn(function()
 		-- Lock player immediately
 		lockControls()
 		enableMovementLock()
+		hideOtherUIs()
 
 		-- Blur immediately
 		blurTo(BLUR_SIZE, BLUR_IN_TIME)
@@ -462,4 +510,3 @@ task.spawn(function()
 		cleanup()
 	end
 end)
-
