@@ -1,464 +1,399 @@
--- [[ SERVER SCRIPT: LocalShopService (Best Version) ]]
--- Currency: leaderstats.Wallet
--- Global rotation: deterministic per RESTOCK_INTERVAL
--- Local reroll: per-player seed
--- Security: UserId mutex locks, success-only cooldown, pcall wrapper
--- Reliability: no update spam, correct IsGlobal, dedupe that survives rejoin
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerStorage = game:GetService("ServerStorage")
+-- [[ LOCAL SCRIPT: LocalShopController ]]
+-- UPDATED: Fixes "Insufficient Money" error when spamming buy button.
+-- NOW: Correctly identifies "Slow down" vs "No Funds".
 local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
 
--- =========================
--- CONFIG
--- =========================
-local CAR_WEIGHTS = {Delta = 50, Iva = 20, Atom = 15, Windsor = 9, Senator = 5, Riva = 1}
-local ALWAYS_STOCK = {Delta = true, Iva = true}
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
 
-local RESTOCK_INTERVAL = 300
-local PURCHASE_COOLDOWN = 0.5
+-- 🛑 IMMEDIATE HIDE
+local gui = PlayerGui:WaitForChild("LocalShopUI")
+local mainFrame = gui:WaitForChild("MainFrame")
+mainFrame.Visible = true 
+gui.Enabled = false 
 
--- =========================
--- MODULES (require once)
--- =========================
 local CarStats = require(ReplicatedStorage:WaitForChild("CarStats"))
+local Kit = require(ReplicatedStorage:WaitForChild("ShopFrontendKit"))
 
--- =========================
--- REMOTES
--- =========================
-local Remotes = ReplicatedStorage:FindFirstChild("ShopRemotes")
-if not Remotes then
-	Remotes = Instance.new("Folder")
-	Remotes.Name = "ShopRemotes"
-	Remotes.Parent = ReplicatedStorage
+-- ⚙️ CONFIGURATION
+local REROLL_PRODUCT_ID = 3520990584 
+local SHOP_CARS = {"Delta", "Iva", "Atom", "Windsor", "Senator", "Riva"}
+local SPECIAL_SFX_ID = "rbxassetid://140072726814802" 
+local BLUR_SIZE = 24 
+
+-- 🎨 FEEDBACK CONFIGURATION
+local FEEDBACK_COLORS = {
+	Success = Color3.fromRGB(80, 200, 120),   -- Soft Mint Green
+	FailRobux = Color3.fromRGB(255, 95, 95),  -- Soft Coral Red
+	FailCash = Color3.fromRGB(255, 170, 60),  -- Soft Amber
+	TooFast = Color3.fromRGB(255, 200, 50)    -- ⚠️ New: Yellow/Orange for spamming
+}
+
+-- 🔴 ROBUX IDS
+local ROBUX_PRODUCTS = {
+	Delta   = 3524326648, 
+	Iva     = 3524327150, 
+	Atom    = 3524327478, 
+	Windsor = 3524327780, 
+	Senator = 3524328208, 
+	Riva    = 3524328713
+}
+
+-- 📡 REMOTES
+local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
+local RemoteOpen = Remotes:WaitForChild("OpenLocalShop")
+local RemoteUpdate = Remotes:WaitForChild("ShopUpdate")
+local FuncGetState = Remotes:WaitForChild("GetShopState")
+local FuncBuyCar = Remotes:WaitForChild("BuyLocalCar")
+
+-- 🛡️ STATE
+local currentState = nil
+local purchaseDebounce = {} 
+local isProcessingPurchase = false 
+local hiddenGuis = {} 
+local currentBlur = nil 
+local feedbackTween = nil 
+
+-- 🛑 UI REFERENCES
+local function getUI()
+	return gui, mainFrame, mainFrame:WaitForChild("ScrollingFrame"), mainFrame:WaitForChild("TimerLabel"), 
+	mainFrame:WaitForChild("RerollButton"), mainFrame:WaitForChild("CloseButton"), mainFrame:WaitForChild("Indicator-purchase", 5)
 end
 
-local function getRemote(name, className)
-	local r = Remotes:FindFirstChild(name)
-	if not r then
-		r = Instance.new(className)
-		r.Name = name
-		r.Parent = Remotes
+-- ============================================================================
+-- 👁️ FEEDBACK LOGIC
+-- ============================================================================
+local function showFeedback(text, color)
+	local _, _, _, _, _, _, indicator = getUI()
+
+	if not indicator then 
+		warn("⚠️ 'Indicator-purchase' not found in MainFrame!") 
+		return 
 	end
-	return r
+
+	if feedbackTween then feedbackTween:Cancel() end
+	indicator.Visible = true
+	indicator.TextTransparency = 0
+	indicator.Text = text
+	indicator.TextColor3 = color
+
+	task.delay(1.5, function()
+		if indicator.Text == text and indicator.Visible then
+			local t = TweenService:Create(indicator, TweenInfo.new(0.5), {TextTransparency = 1})
+			t:Play()
+			feedbackTween = t
+
+			t.Completed:Connect(function()
+				if indicator.TextTransparency >= 0.95 then
+					indicator.Visible = false
+				end
+			end)
+		end
+	end)
 end
 
-local RemoteOpen = getRemote("OpenLocalShop", "RemoteEvent")         -- client -> server (optional)
-local RemoteUpdate = getRemote("ShopUpdate", "RemoteEvent")          -- server -> client
-local FuncGetState = getRemote("GetShopState", "RemoteFunction")     -- client -> server
-local FuncBuyCar = getRemote("BuyLocalCar", "RemoteFunction")        -- client -> server
-
--- =========================
--- BINDABLE (server -> server)
--- =========================
-local RerollBindable = ServerStorage:FindFirstChild("ShopRerollFunction")
-if not RerollBindable then
-	RerollBindable = Instance.new("BindableFunction")
-	RerollBindable.Name = "ShopRerollFunction"
-	RerollBindable.Parent = ServerStorage
-end
-
--- =========================
--- STATE
--- =========================
-local PlayerSessions = {}       -- [userId] = { SeedVersion, LocalSeed, Purchased, Cache }
-local PurchaseLocks = {}        -- [userId] = true/nil
-local LastPurchaseTime = {}     -- [userId] = os.clock()
-
--- =========================
--- TOOL TAGGING + PERSISTENT ID
--- =========================
-
--- Persistent marker name (survives in StarterGear better than Attributes)
-local PERSIST_ID_NAME = "__ShopToolId"
-
-local function setPersistentToolId(tool, toolId)
-	-- Attributes are great for runtime checks, but not reliable for persistence in StarterGear across sessions.
-	tool:SetAttribute("ToolId", toolId)
-
-	local marker = tool:FindFirstChild(PERSIST_ID_NAME)
-	if not marker then
-		marker = Instance.new("StringValue")
-		marker.Name = PERSIST_ID_NAME
-		marker.Parent = tool
-	end
-	marker.Value = toolId
-end
-
-local function getPersistentToolId(tool)
-	local marker = tool:FindFirstChild(PERSIST_ID_NAME)
-	if marker and marker:IsA("StringValue") then
-		return marker.Value
-	end
-	-- fallback to attribute (runtime)
-	return tool:GetAttribute("ToolId")
-end
-
-local function tagIssued(tool, toolId)
-	if not tool then return end
-	tool:SetAttribute("IssuedByServer", true)
-	tool:SetAttribute("IssuedAt", os.time())
-	tool:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
-	tool.CanBeDropped = false
-
-	-- stable ID used for saving + dedupe
-	setPersistentToolId(tool, toolId)
-end
-
-local function starterGearHasToolId(player, toolId)
-	local sg = player:FindFirstChild("StarterGear")
-	if not sg then return false end
-
-	for _, child in ipairs(sg:GetChildren()) do
-		-- check marker (best), then attribute
-		if getPersistentToolId(child) == toolId then
-			return true
+-- ============================================================================
+-- 👁️ FOCUS MODE (BLUR + HIDE UI)
+-- ============================================================================
+local function setBlur(enable)
+	if enable then
+		if not currentBlur then
+			currentBlur = Instance.new("BlurEffect")
+			currentBlur.Size = 0
+			currentBlur.Parent = Lighting
+			currentBlur.Name = "ShopBlur"
+		end
+		TweenService:Create(currentBlur, TweenInfo.new(0.5), {Size = BLUR_SIZE}):Play()
+	else
+		if currentBlur then
+			local t = TweenService:Create(currentBlur, TweenInfo.new(0.5), {Size = 0})
+			t:Play()
+			t.Completed:Connect(function()
+				if currentBlur then currentBlur:Destroy() currentBlur = nil end
+			end)
 		end
 	end
-	return false
 end
 
--- =========================
--- SHOP LOGIC
--- =========================
-local function getGlobalSeedID()
-	return math.floor(os.time() / RESTOCK_INTERVAL)
-end
+local function toggleOtherGuis(shouldHide)
+	if shouldHide then
+		hiddenGuis = {}
+		for _, otherGui in pairs(PlayerGui:GetChildren()) do
+			if otherGui:IsA("ScreenGui") 
+				and otherGui ~= gui 
+				and otherGui.Enabled == true 
+				and otherGui.Name ~= "Balance Indicator" then
 
-local function calculateStockForCar(carName, rng)
-	local weight = CAR_WEIGHTS[carName] or 0
-	local limit = 1
-
-	-- Roll 1: chance to get +1
-	if rng:NextInteger(1, 100) <= weight then
-		limit += 1
-		-- Roll 2: small chance to get +1 again (cap 3)
-		if limit == 2 and rng:NextInteger(1, 100) <= math.ceil(weight * 0.5) then
-			limit += 1
-		end
-	end
-
-	return limit
-end
-
-local function generateStockConfiguration(seedValue)
-	local rng = Random.new(seedValue)
-
-	local featuredFlags = {}
-	local stockLimits = {}
-
-	-- Always stock
-	for name in pairs(ALWAYS_STOCK) do
-		featuredFlags[name] = true
-		stockLimits[name] = calculateStockForCar(name, rng)
-	end
-
-	-- Weighted pool (everything not always-stock)
-	local poolKeys = {}
-	local poolWeights = {}
-	local totalWeight = 0
-
-	for name, weight in pairs(CAR_WEIGHTS) do
-		if not ALWAYS_STOCK[name] then
-			table.insert(poolKeys, name)
-			poolWeights[name] = weight
-			totalWeight += weight
-		end
-	end
-
-	-- If config gets messed up, avoid crashing
-	if totalWeight <= 0 or #poolKeys == 0 then
-		return { Featured = featuredFlags, Limits = stockLimits }
-	end
-
-	-- Rotation count
-	local r = rng:NextInteger(1, 100)
-	local targetCount = (r > 90 and 3) or (r > 55 and 2) or 1
-
-	local pickedCount = 0
-	local safety = 0
-
-	while pickedCount < targetCount and safety < 50 do
-		safety += 1
-		local roll = rng:NextInteger(1, totalWeight)
-
-		local current = 0
-		local picked = nil
-		for _, car in ipairs(poolKeys) do
-			current += poolWeights[car]
-			if roll <= current then
-				picked = car
-				break
+				otherGui.Enabled = false
+				table.insert(hiddenGuis, otherGui)
 			end
 		end
-
-		if picked and not featuredFlags[picked] then
-			featuredFlags[picked] = true
-			stockLimits[picked] = calculateStockForCar(picked, rng)
-			pickedCount += 1
+	else
+		for _, otherGui in pairs(hiddenGuis) do
+			if otherGui and otherGui.Parent then
+				otherGui.Enabled = true
+			end
 		end
+		hiddenGuis = {}
 	end
-
-	return { Featured = featuredFlags, Limits = stockLimits }
 end
 
-local function calculateCurrentStock(limits, purchasedCounts)
-	local current = {}
-	for car, limit in pairs(limits) do
-		local bought = purchasedCounts[car] or 0
-		local left = limit - bought
-		if left < 0 then left = 0 end
-		current[car] = left
+local function setFocusMode(active)
+	setBlur(active)
+	toggleOtherGuis(active)
+
+	local char = player.Character
+	if char and char:FindFirstChild("Humanoid") then
+		char.Humanoid.WalkSpeed = active and 0 or 16
+		char.Humanoid.JumpPower = active and 0 or 50
 	end
-	return current
 end
 
--- Creates/updates session; returns session + didReset
-local function getSession(player)
-	local uid = player.UserId
-	local currentGlobalID = getGlobalSeedID()
+-- ============================================================================
+-- 🧠 RENDER LOGIC
+-- ============================================================================
+local function RenderCard(card, carName, state)
+	local carImage = card:FindFirstChild("CarImage")
+	local stockLabel = card:FindFirstChild("StockInformation") 
+	local buyBtn = card:FindFirstChild("BuyButton")
+	local robuxBtn = card:FindFirstChild("RobuxButton") 
+	local noStockInd = card:FindFirstChild("NoStockIndicator")
 
-	if not PlayerSessions[uid] then
-		PlayerSessions[uid] = {
-			SeedVersion = currentGlobalID,
-			LocalSeed = nil,
-			Purchased = {},
-			Cache = nil,
-		}
+	if carImage and state.Image then carImage.Image = state.Image end
+
+	if stockLabel then
+		stockLabel.Visible = true
+		if state.CanBuy then
+			stockLabel.Text = "On Stock x " .. state.StockAmount
+			stockLabel.TextColor3 = Color3.fromRGB(85, 255, 127) 
+		else
+			stockLabel.Text = "No Stock"
+			stockLabel.TextColor3 = Color3.fromRGB(255, 80, 80) 
+		end
 	end
 
-	local session = PlayerSessions[uid]
-	local didReset = false
+	if buyBtn then
+		if state.CanBuy then
+			buyBtn.Visible = true; buyBtn.Active = true
+			if noStockInd then noStockInd.Visible = false end 
 
-	-- rotation changed => force back to global
-	if session.SeedVersion ~= currentGlobalID then
-		session.SeedVersion = currentGlobalID
-		session.LocalSeed = nil
-		session.Purchased = {}
-		session.Cache = generateStockConfiguration(session.SeedVersion)
-		didReset = true
-	end
-
-	-- lazy cache init
-	if not session.Cache then
-		local seed = session.LocalSeed or session.SeedVersion
-		session.Cache = generateStockConfiguration(seed)
-	end
-
-	return session, didReset
-end
-
-local function buildStatePayload(session)
-	local config = session.Cache
-	local currentStock = calculateCurrentStock(config.Limits, session.Purchased)
-
-	return {
-		Featured = config.Featured,
-		StockLimit = config.Limits,
-		Stock = currentStock,
-		Purchased = session.Purchased,
-		NextRestock = (getGlobalSeedID() + 1) * RESTOCK_INTERVAL,
-		IsGlobal = (session.LocalSeed == nil),
-	}
-end
-
-local function pushUpdate(player, session, reason)
-	local payload = buildStatePayload(session)
-	payload.Reason = reason
-	RemoteUpdate:FireClient(player, payload)
-end
-
--- =========================
--- GET STATE
--- =========================
-FuncGetState.OnServerInvoke = function(player)
-	local session, didReset = getSession(player)
-
-	-- If they happened to call exactly as rotation changed, client will learn via returned state anyway.
-	-- We avoid RemoteUpdate spam here; rotation loop handles "Auto" pushes.
-	return buildStatePayload(session)
-end
-
--- Optional: client can fire OpenLocalShop to get a one-time push update
-RemoteOpen.OnServerEvent:Connect(function(player)
-	local session = getSession(player)
-	pushUpdate(player, session, "Open")
-end)
-
--- =========================
--- BUY
--- =========================
-FuncBuyCar.OnServerInvoke = function(player, carName)
-	if typeof(carName) ~= "string" then
-		return false, "Invalid Car"
-	end
-	if not player or not player.Parent then
-		return false, "Player not available"
-	end
-
-	local uid = player.UserId
-
-	-- Mutex
-	if PurchaseLocks[uid] then
-		return false, "Purchase in progress"
-	end
-
-	-- Cooldown (checked before lock is set)
-	if (os.clock() - (LastPurchaseTime[uid] or 0)) < PURCHASE_COOLDOWN then
-		return false, "Slow down"
-	end
-
-	PurchaseLocks[uid] = true
-
-	local pOk, logicOk, msg = pcall(function()
-		local session, didReset = getSession(player)
-
-		-- If rotation reset happened during this call, optionally push Auto once here:
-		-- (Usually rotation loop will do it, but this makes purchases safe even if loop is laggy.)
-		if didReset then
-			pushUpdate(player, session, "Auto")
-		end
-
-		local config = session.Cache
-		local carsTable = CarStats and CarStats.Cars
-		if typeof(carsTable) ~= "table" then
-			return false, "CarStats Error"
-		end
-
-		local carData = carsTable[carName]
-		if not carData or not config.Featured[carName] then
-			return false, "Invalid Car"
-		end
-
-		if typeof(carData.Price) ~= "number" then
-			return false, "Price Config Error"
-		end
-
-		local bought = session.Purchased[carName] or 0
-		local limit = config.Limits[carName] or 0
-		if bought >= limit then
-			return false, "Out of Stock"
-		end
-
-		-- Wallet
-		local ls = player:FindFirstChild("leaderstats")
-		local wallet = ls and ls:FindFirstChild("Wallet")
-		if not wallet or not wallet:IsA("IntValue") then
-			return false, "Wallet Not Found"
-		end
-
-		if wallet.Value < carData.Price then
-			return false, "Insufficient Cash (Withdraw from ATM)"
-		end
-
-		-- Tool source
-		local toolsFolder = ServerStorage:FindFirstChild("CarTools")
-		if not toolsFolder then
-			return false, "System Error: Tool Folder Missing"
-		end
-
-		local toolSource = toolsFolder:FindFirstChild(carName) or toolsFolder:FindFirstChild(carName .. " Item")
-		if not toolSource then
-			return false, "System Error: Tool Missing"
-		end
-
-		-- Charge first (still safe; we refund on any later failure inside pcall)
-		wallet.Value -= carData.Price
-
-		-- Give Backpack tool
-		local backpack = player:FindFirstChildOfClass("Backpack")
-		if not backpack then
-			-- Refund if backpack missing
-			wallet.Value += carData.Price
-			return false, "System Error: Backpack Missing"
-		end
-
-		local backpackTool = toolSource:Clone()
-		tagIssued(backpackTool, carName) -- stable id = carName
-		backpackTool.Parent = backpack
-
-		-- Give StarterGear tool if not already owned (dedupe survives rejoin)
-		local sg = player:FindFirstChild("StarterGear")
-		if sg and not starterGearHasToolId(player, carName) then
-			local gearTool = toolSource:Clone()
-			tagIssued(gearTool, carName)
-			gearTool.Parent = sg
-		end
-
-		-- Increment purchase count
-		session.Purchased[carName] = bought + 1
-
-		-- Push update to client
-		pushUpdate(player, session, "Purchase")
-
-		return true, "Success"
-	end)
-
-	-- release lock
-	PurchaseLocks[uid] = nil
-
-	if not pOk then
-		warn("Shop System Error:", logicOk) -- logicOk is the error string
-		return false, "Internal System Error"
-	end
-
-	-- cooldown only on actual success
-	if logicOk then
-		LastPurchaseTime[uid] = os.clock()
-	end
-
-	return logicOk, msg
-end
-
--- =========================
--- REROLL (server-side callable)
--- =========================
-function RerollBindable.OnInvoke(player)
-	if not player or not player.Parent then
-		return false
-	end
-
-	local session = getSession(player)
-
-	session.LocalSeed = math.random(1, 999999999)
-	session.Purchased = {}
-	session.Cache = generateStockConfiguration(session.LocalSeed)
-
-	pushUpdate(player, session, "Reroll")
-	return true
-end
-
--- =========================
--- ROTATION LOOP
--- =========================
-task.spawn(function()
-	local lastGlobalID = getGlobalSeedID()
-
-	while true do
-		task.wait(1)
-		local currentID = getGlobalSeedID()
-
-		if currentID ~= lastGlobalID then
-			lastGlobalID = currentID
-			print("🔄 GLOBAL SHOP ROTATION")
-
-			for _, player in ipairs(Players:GetPlayers()) do
-				local session, didReset = getSession(player)
-				if didReset then
-					pushUpdate(player, session, "Auto")
+			if buyBtn:IsA("TextButton") then
+				if state.IsPurchasing then
+					buyBtn.Text = "..."
+					buyBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+				else
+					buyBtn.Text = "$" .. state.Price
+					buyBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
 				end
 			end
+			if buyBtn:IsA("ImageButton") then buyBtn.ImageColor3 = Color3.new(1,1,1) end
+		else
+			buyBtn.Visible = false; buyBtn.Active = false
+			if noStockInd then noStockInd.Visible = true end 
 		end
 	end
-end)
 
--- =========================
--- CLEANUP
--- =========================
-Players.PlayerRemoving:Connect(function(player)
-	local uid = player.UserId
-	PlayerSessions[uid] = nil
-	PurchaseLocks[uid] = nil
-	LastPurchaseTime[uid] = nil
-end)
+	if robuxBtn then 
+		robuxBtn.Visible = state.CanRobux 
+		robuxBtn.Active = true 
+	end
+end
+
+local function UpdateDisplay(scrollFrame)
+	if not currentState then return end
+
+	for _, carName in ipairs(SHOP_CARS) do
+		local card = scrollFrame:FindFirstChild(carName)
+		if card then
+			local data = CarStats.Cars[carName]
+			local isFeatured = currentState.Featured[carName] == true
+			local currentStock = currentState.Stock and currentState.Stock[carName] or 0
+			local isPurchasing = purchaseDebounce[carName]
+
+			local vm = {
+				Image = data.Image,
+				Price = data.Price,
+				IsPurchasing = isPurchasing,
+				IsFeatured = isFeatured,
+				StockAmount = currentStock,
+				CanBuy = (isFeatured and currentStock > 0),
+				CanRobux = (ROBUX_PRODUCTS[carName] ~= nil)
+			}
+			RenderCard(card, carName, vm)
+		end
+	end
+end
+
+-- ✅ THE FIX IS HERE (Updated Logic)
+local function AttemptBuy(carName, scrollFrame)
+	if purchaseDebounce[carName] then return end
+	purchaseDebounce[carName] = true
+	isProcessingPurchase = true 
+	UpdateDisplay(scrollFrame)
+
+	task.spawn(function()
+		local success, msg = FuncBuyCar:InvokeServer(carName)
+		purchaseDebounce[carName] = false
+		isProcessingPurchase = false 
+
+		if success then
+			Kit.Sound:Play("BuySuccess")
+			showFeedback("Purchase Success", FEEDBACK_COLORS.Success)
+		else
+			Kit.Sound:Play("BuyFail")
+			Kit.Toast:Show(msg, Color3.fromRGB(255, 80, 80))
+			local card = scrollFrame:FindFirstChild(carName)
+			if card then Kit.Tween:Shake(card) end
+
+			-- 🧠 SMART ERROR HANDLING
+			if msg == "Slow down" or msg == "Purchase in progress" then
+				showFeedback("Too Fast!", FEEDBACK_COLORS.TooFast) -- Orange/Yellow Warning
+			elseif msg == "Insufficient Cash (Withdraw from ATM)" or msg == "Wallet Not Found" then
+				showFeedback("Insufficient money", FEEDBACK_COLORS.FailCash) -- Red Warning
+			elseif msg == "Out of Stock" then
+				showFeedback("Out of Stock!", FEEDBACK_COLORS.FailCash)
+			else
+				-- Fallback for weird errors
+				showFeedback(msg, FEEDBACK_COLORS.FailCash)
+			end
+		end
+		UpdateDisplay(scrollFrame)
+	end)
+end
+
+-- ============================================================================
+-- 🚀 INIT & EVENTS
+-- ============================================================================
+local function init()
+	local gui, mainFrame, scrollFrame, timerLabel, rerollBtn, closeBtn, indicatorLabel = getUI()
+
+	if indicatorLabel then indicatorLabel.Visible = false end
+
+	gui.Enabled = false 
+	Kit.Inventory:Init(SHOP_CARS)
+
+	Kit.Tween:SetupButton(rerollBtn, function()
+		MarketplaceService:PromptProductPurchase(player, REROLL_PRODUCT_ID)
+	end)
+
+	Kit.Tween:SetupButton(closeBtn, function() 
+		setFocusMode(false) 
+		gui.Enabled = false 
+	end)
+
+	for _, carName in ipairs(SHOP_CARS) do
+		local card = scrollFrame:WaitForChild(carName, 5)
+		if card then
+			local specificImageName = carName .. "-Image"
+			local imageButton = card:FindFirstChild(specificImageName)
+			if not imageButton then imageButton = card:FindFirstChild("CarImage") end 
+
+			if imageButton then
+				Kit.Tween:SetupWiggle(imageButton)
+			end
+
+			local buyBtn = card:FindFirstChild("BuyButton")
+			if buyBtn then
+				Kit.Tween:SetupButton(buyBtn, function()
+					if buyBtn.Visible and buyBtn.Active then AttemptBuy(carName, scrollFrame) end
+				end)
+			end
+
+			local robuxBtn = card:FindFirstChild("RobuxButton")
+			if robuxBtn then
+				Kit.Tween:SetupButton(robuxBtn, function()
+					local pid = ROBUX_PRODUCTS[carName]
+					if pid and pid > 0 then 
+						MarketplaceService:PromptProductPurchase(player, pid) 
+					else
+						warn("⚠️ Robux ID is 0 for " .. carName)
+					end
+				end)
+			end
+
+			local noStockBtn = card:FindFirstChild("NoStockIndicator")
+			if noStockBtn then
+				Kit.Tween:SetupButton(noStockBtn)
+			end
+		end
+	end
+
+	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
+		if userId ~= player.UserId then return end
+
+		local isRelevant = false
+		if productId == REROLL_PRODUCT_ID then isRelevant = true end
+		for _, id in pairs(ROBUX_PRODUCTS) do
+			if id == productId then isRelevant = true; break end
+		end
+
+		if not isRelevant then return end
+
+		if isPurchased then
+			if productId == REROLL_PRODUCT_ID then
+				-- ✅ REROLL SUCCESS
+				showFeedback("Successfully Restocked", FEEDBACK_COLORS.Success)
+				Kit.Sound:Play("PaidReroll") 
+			else
+				-- ✅ CAR PURCHASE SUCCESS
+				showFeedback("Purchase Success", FEEDBACK_COLORS.Success)
+
+				local s = Instance.new("Sound")
+				s.Name = "CarPurchaseSFX"
+				s.SoundId = SPECIAL_SFX_ID
+				s.Volume = 1.5 
+				s.Pitch = 1.0
+				s.Parent = SoundService
+				s:Play()
+				Debris:AddItem(s, 5)
+			end
+		else
+			-- ❌ ROBUX FAIL/CANCEL
+			Kit.Sound:Play("BuyFail") 
+
+			if productId == REROLL_PRODUCT_ID then
+				showFeedback("Restock Failed", FEEDBACK_COLORS.FailRobux)
+			else
+				showFeedback("Purchase Failed", FEEDBACK_COLORS.FailRobux)
+			end
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			if gui.Enabled then
+				local now = os.time()
+				local secondsLeft = 300 - (now % 300)
+				timerLabel.Text = string.format("New Cars will restock at : %02d:%02d", math.floor(secondsLeft/60), secondsLeft%60)
+			end
+		end
+	end)
+
+	RemoteOpen.OnClientEvent:Connect(function()
+		setFocusMode(true) 
+		Kit.Sound:Play("Open")
+		gui.Enabled = true 
+
+		currentState = {Featured = {}, Stock = {}, StockLimit = {}, Purchased = {}}
+		UpdateDisplay(scrollFrame)
+
+		local realState = FuncGetState:InvokeServer()
+		currentState = realState
+		UpdateDisplay(scrollFrame)
+	end)
+
+	RemoteUpdate.OnClientEvent:Connect(function(newState)
+		currentState = newState
+		UpdateDisplay(scrollFrame)
+		if not isProcessingPurchase then Kit.Sound:Play("Restock") end
+	end)
+end
+
+if player.Character then init() else player.CharacterAdded:Wait(); init() end
