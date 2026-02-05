@@ -1,5 +1,7 @@
--- [[ SERVER SCRIPT: PadController (Refactored & Secure - Audit Fixed) ]]
--- [[ FIXES: Mismatched Model Names, Tool Lookup, Ghost Locks ]]
+-- [[ SERVER SCRIPT: PadController (v2 - Progression Locked) ]]
+-- Purpose: Handles placing/picking up cars with progression validation.
+-- Runs on: Server
+-- Security: Validates Plot Ownership AND Unlocked Level before placement.
 
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
@@ -33,35 +35,31 @@ pcall(function() CarStats = require(ReplicatedStorage:WaitForChild("CarStats", 5
 local processingTracks = {} 
 
 -- ============================================================================
--- 🛠️ HELPER FUNCTIONS (Audit Fix)
+-- 🛠️ HELPER FUNCTIONS
 -- ============================================================================
 
--- ✅ AUDIT FIX: Reverse lookup to handle "Vapid" (Key) vs "Vapid Sadler" (Display Name)
+-- ✅ NEW: Extract Pad Number (e.g. "Pad5" -> 5)
+local function getPadNumber(padObject)
+	local num = padObject.Name:match("Pad(%d+)")
+	return tonumber(num) or 1 -- Default to 1 if name format is weird
+end
+
 local function FindModelNameFromTool(toolName)
 	local clean = toolName:gsub(" Item", ""):gsub("Item", "")
-
-	-- 1. Direct Match
 	if CarModels:FindFirstChild(clean) then return clean end
-
-	-- 2. Stats Lookup (Key -> Display Name)
 	if CarStats and CarStats.Cars and CarStats.Cars[clean] then
 		local stats = CarStats.Cars[clean]
 		if CarModels:FindFirstChild(stats.Name) then return stats.Name end
 	end
-
 	return nil
 end
 
 local function FindToolFromModelName(modelName)
-	-- 1. Direct Match
 	if CarTools:FindFirstChild(modelName) then return CarTools[modelName] end
 	if CarTools:FindFirstChild(modelName.." Item") then return CarTools[modelName.." Item"] end
-
-	-- 2. Reverse Stats Lookup (Display Name -> Key)
 	if CarStats and CarStats.Cars then
 		for key, stats in pairs(CarStats.Cars) do
 			if stats.Name == modelName then
-				-- Check for key-based tool name
 				if CarTools:FindFirstChild(key) then return CarTools[key] end
 				if CarTools:FindFirstChild(key.." Item") then return CarTools[key.." Item"] end
 			end
@@ -110,7 +108,7 @@ local function validatePadState(occupiedVal, linkedCarVal, placePrompt, pickupPr
 end
 
 -- ============================================================================
--- 📦 TRANSACTION FUNCTIONS
+-- 📦 TRANSACTION FUNCTIONS (Unchanged)
 -- ============================================================================
 local function removeToolFromPlayer(player, toolName)
 	local found = false
@@ -162,19 +160,32 @@ local function playSound(name, parent)
 end
 
 -- ============================================================================
--- 🎮 INTERACTION LOGIC
+-- 🎮 INTERACTION LOGIC (AttemptPlace UPDATED)
 -- ============================================================================
 
 local function AttemptPlace(player, padObject, padPart, occupiedVal, linkedCarVal, placePrompt, pickupPrompt)
 	if occupiedVal.Value then return end
+	
+	-- 1. Validate Plot Ownership
 	local thisPlot = getPlotFolder(padObject)
 	if not thisPlot or player:GetAttribute("OccupiedPlot") ~= thisPlot.Name then return end
+
+	-- 🛡️ 2. SECURITY FIX: Validate Progression Level
+	local padNumber = getPadNumber(padObject)
+	local unlockedLevel = tonumber(player:GetAttribute("HighestUnlockedPad")) or 1
+	
+	if padNumber > unlockedLevel then
+		warn("⚠️ " .. player.Name .. " attempted to place on Pad " .. padNumber .. " (Locked). Max: " .. unlockedLevel)
+		return -- STOP EXECUTION HERE
+	end
+
+	-- 3. Validate Distance
 	if not isCloseEnough(player, padPart) then return end
 
 	local tool = player.Character:FindFirstChildWhichIsA("Tool")
 	if not tool then return end
 
-	-- ✅ AUDIT FIX: Use Robust Lookup
+	-- 4. Validate Car Model
 	local realModelName = FindModelNameFromTool(tool.Name)
 	local realCar = realModelName and CarModels:FindFirstChild(realModelName)
 
@@ -238,8 +249,6 @@ local function AttemptPickup(player, padObject, padPart, occupiedVal, linkedCarV
 	end
 
 	local carName = carToRemove.Name
-
-	-- ✅ AUDIT FIX: Robust Lookup (Display Name -> Tool)
 	local foundTool = FindToolFromModelName(carName)
 
 	if foundTool then
@@ -269,7 +278,7 @@ local function AttemptPickup(player, padObject, padPart, occupiedVal, linkedCarV
 end
 
 -- ============================================================================
--- 🚀 SETUP
+-- 🚀 SETUP (Unchanged)
 -- ============================================================================
 local function setupPad(padObject)
 	local padPart = getMainPart(padObject)
