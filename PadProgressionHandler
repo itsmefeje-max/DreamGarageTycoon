@@ -1,56 +1,52 @@
--- [[ SERVER SCRIPT: PadProgressionHandler (Final Fix) ]]
+-- [[ SERVER SCRIPT: PadProgressionHandler (Fixed & Debugged) ]]
 -- Purpose: Handles Pad Unlocking, Visibility, and Purchasing
 -- FIXES: 
--- 1. "Late Load" Bug (Checks if you already own the plot when script starts)
--- 2. "Empty Pad 1" Safety (Won't error on empty starter pads)
--- 3. "Falling Button" Fix (Forces Anchored = true)
+-- 1. "Player Nil" Race Condition (Retries finding player until they exist)
+-- 2. "Ghost Buttons" (Forces visual update immediately)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
-print("🟢 PadProgressionHandler: Script Loaded")
+print("🟢 PadProgressionHandler: Loaded & Ready")
 
--- 🛠️ HELPER: Safely Toggle Visibility & FORCE ANCHOR
+-- ============================================================================
+-- 1. VISUAL HANDLER (Hides/Shows Buttons)
+-- ============================================================================
 local function toggleVisual(obj, isVisible, canTouch)
 	local transparency = isVisible and 0 or 1
 	local collide = isVisible 
 
-	-- Function to apply settings to a single part
 	local function applyToPart(part)
 		if part:IsA("BasePart") then
 			part.Transparency = transparency
 			part.CanCollide = collide
 			part.CanTouch = canTouch
 			part.CanQuery = canTouch
-			part.Anchored = true -- 🔒 CRITICAL: Keeps button from falling into void
+			part.Anchored = true -- Prevents falling buttons
 		elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
 			part.Enabled = isVisible
 		end
 	end
 
 	if obj:IsA("Model") then
-		for _, child in pairs(obj:GetDescendants()) do
-			applyToPart(child)
-		end
+		for _, child in pairs(obj:GetDescendants()) do applyToPart(child) end
 	else
 		applyToPart(obj)
 	end
 end
 
--- 🛠️ UPDATE VISUALS
 local function updatePadVisuals(plot, unlockedLevel)
 	unlockedLevel = tonumber(unlockedLevel) or 1
-	
-	local padsFolder = plot:FindFirstChild("Pads")
-	if not padsFolder then return end
+	-- print("🎨 DEBUG: Updating " .. plot.Name .. " Visuals for Level " .. unlockedLevel)
 
-	-- Loop through ALL pads (1 to 14)
+	local padsFolder = plot:FindFirstChild("Pads")
+	if not padsFolder then return end 
+
 	for i = 1, 14 do
 		local padName = "Pad" .. i
 		local padModel = padsFolder:FindFirstChild(padName)
 
-		-- Only process if the pad actually exists (Safe for empty Pad 1)
 		if padModel then
 			local geometry = padModel:FindFirstChild("Geometry")
 			local buyButton = padModel:FindFirstChild("BuyButton")
@@ -62,12 +58,11 @@ local function updatePadVisuals(plot, unlockedLevel)
 
 			elseif i == unlockedLevel + 1 then
 				-- STATE: NEXT TO BUY (Hide Geometry, Show Button)
-				-- This is where Pad 2 becomes visible for a new player (Level 1)
 				if geometry then toggleVisual(geometry, false, false) end
 				if buyButton then toggleVisual(buyButton, true, true) end
 
 			else
-				-- STATE: LOCKED (Hide Everything)
+				-- STATE: LOCKED (Hide Both)
 				if geometry then toggleVisual(geometry, false, false) end
 				if buyButton then toggleVisual(buyButton, false, false) end
 			end
@@ -75,97 +70,109 @@ local function updatePadVisuals(plot, unlockedLevel)
 	end
 end
 
--- 💰 PURCHASE LOGIC
+-- ============================================================================
+-- 2. SIMPLE BUY FUNCTION
+-- ============================================================================
 local function setupBuyButton(plot, padModel, padNumber)
 	local buyButton = padModel:FindFirstChild("BuyButton")
-	if not buyButton then return end -- Skip if no button (like Pad 1)
+	if not buyButton then return end 
 
 	if buyButton:GetAttribute("Connected") then return end
 	buyButton:SetAttribute("Connected", true)
 
-	local function onTouch(hit)
-		local char = hit.Parent
-		local player = Players:GetPlayerFromCharacter(char)
-		if not player then return end
-
-		-- Check if this is the owner
+	local function attemptBuy(player)
+		-- 1. Check Owner
 		if plot.Owner.Value ~= player.Name then return end
 
-		-- CHECK 1: Is this the correct next pad?
+		-- 2. Check Sequence
 		local currentLevel = player:GetAttribute("HighestUnlockedPad") or 1
 		if padNumber ~= (currentLevel + 1) then return end
 
-		-- CHECK 2: Cost
-		local cost = padModel:GetAttribute("Cost") or 500 -- Default cost 500
-		
+		-- 3. Check Money
+		local cost = padModel:GetAttribute("Cost") or 500
 		local leaderstats = player:FindFirstChild("leaderstats")
-		local cash = leaderstats and leaderstats:FindFirstChild("Cash") -- Ensure Cash exists
+		local cash = leaderstats and leaderstats:FindFirstChild("Cash")
 
 		if cash and cash.Value >= cost then
-			-- TRANSACTION
 			cash.Value -= cost
-			player:SetAttribute("HighestUnlockedPad", padNumber) -- Update Progress
-
-			-- REFRESH VISUALS
-			updatePadVisuals(plot, padNumber)
-			print("✅ " .. player.Name .. " Bought Pad " .. padNumber)
+			player:SetAttribute("HighestUnlockedPad", padNumber) -- Update Data
+			updatePadVisuals(plot, padNumber) -- Update Visuals
+			print("✅ " .. player.Name .. " Purchased Pad " .. padNumber)
 		end
 	end
 
-	-- Connect Touch (Handles both Parts and Models)
+	local function onTouch(hit)
+		local player = Players:GetPlayerFromCharacter(hit.Parent)
+		if player then attemptBuy(player) end
+	end
+
 	if buyButton:IsA("BasePart") then
 		buyButton.Touched:Connect(onTouch)
 	elseif buyButton:IsA("Model") then
 		for _, part in pairs(buyButton:GetDescendants()) do
-			if part:IsA("BasePart") then
-				part.Touched:Connect(onTouch)
-			end
+			if part:IsA("BasePart") then part.Touched:Connect(onTouch) end
 		end
 	end
 end
 
--- 🚀 INITIALIZE PLOT
+-- ============================================================================
+-- 3. PLOT SETUP (THE FIX)
+-- ============================================================================
 local function setupPlot(plot)
-	local ownerVal = plot:WaitForChild("Owner", 10)
-	if not ownerVal then return end
+	task.spawn(function()
+		local ownerVal = plot:WaitForChild("Owner", 10)
+		if not ownerVal then return end
 
-	-- Handler Function
-	local function onOwnerChange(newOwner)
-		if newOwner == "" then 
-			-- Reset if empty
-			updatePadVisuals(plot, 1) 
-		else
-			local player = Players:FindFirstChild(newOwner)
-			if player then
-				-- Load Owner's Level (Defaults to 1 for Starter Pad)
-				local level = player:GetAttribute("HighestUnlockedPad") or 1
-				print("👤 Owner Loaded: " .. newOwner .. " | Level: " .. level)
-				updatePadVisuals(plot, level)
+		local function onOwnerChange(newOwner)
+			if newOwner == "" then 
+				updatePadVisuals(plot, 1) 
+			else
+				-- 🛡️ RACE CONDITION FIX: Retry loop to find player
+				local player = Players:FindFirstChild(newOwner)
+				local retries = 0
+				
+				-- If player is nil, wait and try again (up to 5 seconds)
+				while not player and retries < 20 do
+					task.wait(0.25)
+					player = Players:FindFirstChild(newOwner)
+					retries += 1
+				end
 
-				-- Listen for upgrades (Live updates)
-				player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(function()
-					updatePadVisuals(plot, player:GetAttribute("HighestUnlockedPad") or 1)
-				end)
+				if player then
+					-- Found you! Now we can safely check your level
+					local savedLevel = player:GetAttribute("HighestUnlockedPad") or 1
+					print("🔎 Player Found: " .. newOwner .. " | Loading Pads Level: " .. savedLevel)
+					
+					updatePadVisuals(plot, savedLevel)
+
+					-- Listen for future upgrades
+					player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(function()
+						local newLevel = player:GetAttribute("HighestUnlockedPad") or 1
+						updatePadVisuals(plot, newLevel)
+					end)
+				else
+					warn("❌ Critical: Assigned owner '"..newOwner.."' but Player object never loaded.")
+				end
 			end
 		end
-	end
 
-	ownerVal.Changed:Connect(onOwnerChange)
+		ownerVal.Changed:Connect(onOwnerChange)
 
-	-- Setup Buttons
-	local pads = plot:WaitForChild("Pads")
-	for i = 2, 14 do -- Start at 2 because Pad 1 is free/starter
-		local p = pads:FindFirstChild("Pad"..i)
-		if p then setupBuyButton(plot, p, i) end
-	end
-    
-	-- ✅ CRITICAL FIX: Run immediately if owner is already set!
-	-- This catches the "Late Load" issue.
-	if ownerVal.Value ~= "" then
-		onOwnerChange(ownerVal.Value)
-	else
-		updatePadVisuals(plot, 1) -- Ensure clean state
-	end
+		local pads = plot:WaitForChild("Pads", 30)
+		if pads then
+			for i = 2, 14 do 
+				local p = pads:WaitForChild("Pad"..i, 5)
+				if p then setupBuyButton(plot, p, i) end
+			end
+		end
+
+		-- Run immediately if owner is already set
+		if ownerVal.Value ~= "" then 
+			onOwnerChange(ownerVal.Value) 
+		else 
+			updatePadVisuals(plot, 1) 
+		end
+	end)
 end
 
 for _, p in pairs(TycoonFolder:GetChildren()) do setupPlot(p) end
