@@ -1,23 +1,36 @@
--- -- Purpose: Handles Pad Unlocking, Visibility, and Purchasing
+-- [[ SERVER SCRIPT: PadProgressionHandler (Visual Fix + Effects Event) ]]
+-- -- Purpose: Handles Pad Unlocking, Visibility, Purchasing, and triggers Client Effects.
 -- -- Runs on: Server
--- -- Location: ServerScriptService.PadProgressionHandler
+-- -- Location: ServerScriptService
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
-local Debris = game:GetService("Debris") -- Added for sound cleanup
 
 -- ============================================================================
--- 🔊 SOUND CONFIGURATION (Edit Here)
+-- 📡 REMOTE EVENT SETUP (Communication to Client)
 -- ============================================================================
--- Change this ID to whatever Sound Effect you want for buying a pad
+-- We create this event so we can tell the Client to play the FOV/UI effects
+local PadUnlockEvent = ReplicatedStorage:FindFirstChild("PadUnlockEvent")
+if not PadUnlockEvent then
+	PadUnlockEvent = Instance.new("RemoteEvent")
+	PadUnlockEvent.Name = "PadUnlockEvent"
+	PadUnlockEvent.Parent = ReplicatedStorage
+end
+
+-- ============================================================================
+-- 🔊 SOUND CONFIGURATION
+-- ============================================================================
 local PURCHASE_SOUND_ID = "rbxassetid://14810387808" 
 local PURCHASE_VOLUME = 0.5
 
 print("🟢 PadProgressionHandler: Loaded & Ready")
 
 -- ============================================================================
--- 1. VISUAL HANDLER (UPDATED FIX)
+-- 1. VISUAL HANDLER (Recursive Fix Preserved)
 -- ============================================================================
 local function toggleVisual(obj, isVisible, canTouch)
 	local transparency = isVisible and 0 or 1
@@ -29,18 +42,17 @@ local function toggleVisual(obj, isVisible, canTouch)
 			part.CanCollide = collide
 			part.CanTouch = canTouch
 			part.CanQuery = canTouch
-			part.Anchored = true -- Prevents falling buttons
+			part.Anchored = true 
 			-- ✅ FIX: Handles BillboardGui (BuyInfo/LockedLabel) and SurfaceGui
 		elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
 			part.Enabled = isVisible
 		end
 	end
 
-	-- 1. Apply to the main object itself (The BuyButton Part)
+	-- 1. Apply to the main object itself
 	applyToPart(obj)
 
 	-- 2. Apply to ALL descendants (Finds BuyInfo/LockedLabel inside the Part)
-	-- This runs regardless of whether 'obj' is a Model or a BasePart
 	for _, child in pairs(obj:GetDescendants()) do 
 		applyToPart(child) 
 	end
@@ -48,8 +60,6 @@ end
 
 local function updatePadVisuals(plot, unlockedLevel)
 	unlockedLevel = tonumber(unlockedLevel) or 1
-	-- print("🎨 DEBUG: Updating " .. plot.Name .. " Visuals for Level " .. unlockedLevel)
-
 	local padsFolder = plot:FindFirstChild("Pads")
 	if not padsFolder then return end 
 
@@ -62,17 +72,15 @@ local function updatePadVisuals(plot, unlockedLevel)
 			local buyButton = padModel:FindFirstChild("BuyButton")
 
 			if i <= unlockedLevel then
-				-- STATE: OWNED (Show Geometry, Hide Button)
+				-- STATE: OWNED
 				if geometry then toggleVisual(geometry, true, true) end
 				if buyButton then toggleVisual(buyButton, false, false) end
-
 			elseif i == unlockedLevel + 1 then
-				-- STATE: NEXT TO BUY (Hide Geometry, Show Button)
+				-- STATE: NEXT TO BUY
 				if geometry then toggleVisual(geometry, false, false) end
 				if buyButton then toggleVisual(buyButton, true, true) end
-
 			else
-				-- STATE: LOCKED (Hide Both)
+				-- STATE: LOCKED
 				if geometry then toggleVisual(geometry, false, false) end
 				if buyButton then toggleVisual(buyButton, false, false) end
 			end
@@ -81,7 +89,7 @@ local function updatePadVisuals(plot, unlockedLevel)
 end
 
 -- ============================================================================
--- 2. SIMPLE BUY FUNCTION
+-- 2. BUY FUNCTION (Updated with Event Trigger)
 -- ============================================================================
 local function setupBuyButton(plot, padModel, padNumber)
 	local buyButton = padModel:FindFirstChild("BuyButton")
@@ -91,38 +99,33 @@ local function setupBuyButton(plot, padModel, padNumber)
 	buyButton:SetAttribute("Connected", true)
 
 	local function attemptBuy(player)
-		-- 1. Check Owner
 		if plot.Owner.Value ~= player.Name then return end
 
-		-- 2. Check Sequence
 		local currentLevel = tonumber(player:GetAttribute("HighestUnlockedPad")) or 1
 		if padNumber ~= (currentLevel + 1) then return end
 
-		-- 3. Check Money
-		-- ✅ FIX: Force tonumber() to prevent "string <= number" errors if Attribute is wrong type
 		local cost = tonumber(padModel:GetAttribute("Cost")) or 500
-
 		local leaderstats = player:FindFirstChild("leaderstats")
-
-		-- ✅ CHANGED: We now look for 'Wallet' instead of 'Cash'
-		-- This ensures the BalanceManager detects the change and plays the floating text animation.
 		local wallet = leaderstats and leaderstats:FindFirstChild("Wallet")
 
 		if wallet and wallet.Value >= cost then
-			wallet.Value -= cost -- Deduct from Wallet (Physical Cash)
+			wallet.Value -= cost 
 
-			player:SetAttribute("HighestUnlockedPad", padNumber) -- Update Data
-			updatePadVisuals(plot, padNumber) -- Update Visuals
+			player:SetAttribute("HighestUnlockedPad", padNumber)
+			updatePadVisuals(plot, padNumber)
 			print("✅ " .. player.Name .. " Purchased Pad " .. padNumber)
 
-			-- ✅ OPTIONAL: Play Sound (Matches Shop Feel)
-			-- MODIFIED: Now uses the Configuration Variables from the top
+			-- 🔊 Play Sound (Server Side)
 			local s = Instance.new("Sound")
 			s.SoundId = PURCHASE_SOUND_ID 
 			s.Volume = PURCHASE_VOLUME
 			s.Parent = buyButton:IsA("BasePart") and buyButton or buyButton.PrimaryPart
 			s:Play()
 			Debris:AddItem(s, 2)
+
+			-- ✨ TRIGGER CLIENT EFFECTS (New Feature)
+			-- This tells the specific player to run their local effect script
+			PadUnlockEvent:FireClient(player, padNumber)
 		end
 	end
 
@@ -152,11 +155,8 @@ local function setupPlot(plot)
 			if newOwner == "" then 
 				updatePadVisuals(plot, 1) 
 			else
-				-- 🛡️ RACE CONDITION FIX: Retry loop to find player
 				local player = Players:FindFirstChild(newOwner)
 				local retries = 0
-
-				-- If player is nil, wait and try again (up to 5 seconds)
 				while not player and retries < 20 do
 					task.wait(0.25)
 					player = Players:FindFirstChild(newOwner)
@@ -164,19 +164,13 @@ local function setupPlot(plot)
 				end
 
 				if player then
-					-- Found you! Now we can safely check your level
 					local savedLevel = tonumber(player:GetAttribute("HighestUnlockedPad")) or 1
-					print("🔎 Player Found: " .. newOwner .. " | Loading Pads Level: " .. savedLevel)
-
 					updatePadVisuals(plot, savedLevel)
 
-					-- Listen for future upgrades
 					player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(function()
 						local newLevel = tonumber(player:GetAttribute("HighestUnlockedPad")) or 1
 						updatePadVisuals(plot, newLevel)
 					end)
-				else
-					warn("❌ Critical: Assigned owner '"..newOwner.."' but Player object never loaded.")
 				end
 			end
 		end
@@ -191,12 +185,7 @@ local function setupPlot(plot)
 			end
 		end
 
-		-- Run immediately if owner is already set
-		if ownerVal.Value ~= "" then 
-			onOwnerChange(ownerVal.Value) 
-		else 
-			updatePadVisuals(plot, 1) 
-		end
+		if ownerVal.Value ~= "" then onOwnerChange(ownerVal.Value) else updatePadVisuals(plot, 1) end
 	end)
 end
 
