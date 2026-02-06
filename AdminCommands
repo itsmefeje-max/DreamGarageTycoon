@@ -101,6 +101,12 @@ local function findTool(itemName)
 	return nil
 end
 
+local function getAmount(amountText)
+	local amount = tonumber(amountText)
+	if not amount or amount <= 0 or amount ~= amount then return nil end
+	return math.floor(amount)
+end
+
 local function getTargets(speaker, selector)
 	if not selector then return {} end
 	selector = selector:lower()
@@ -167,6 +173,15 @@ local function giveItem(player, tool, cleanID, optionalOwnedSet)
 	return true
 end
 
+local function addCurrency(player, statName, amount)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then return false end
+	local stat = leaderstats:FindFirstChild(statName)
+	if not stat then return false end
+	stat.Value = stat.Value + amount
+	return true
+end
+
 -- ============================================================================
 -- 💬 CHAT HANDLER
 -- ============================================================================
@@ -229,6 +244,24 @@ Players.PlayerAdded:Connect(function(player)
 		elseif command == "/unfly" then
 			local targets = getTargets(player, args[2])
 			for _, t in pairs(targets) do setFlight(t, false) end
+
+			-- [[ /givebank & /givewallet ]]
+		elseif command == "/givebank" or command == "/givewallet" then
+			local selector = args[2]
+			local amount = getAmount(args[3])
+			if not selector or not amount then return end
+
+			local targets = getTargets(player, selector)
+			if #targets == 0 then return end
+
+			local statName = command == "/givebank" and "Cash" or "Wallet"
+			for _, t in pairs(targets) do
+				if addCurrency(t, statName, amount) then
+					print(("💰 [Admin] Added %s to %s (%s)"):format(amount, t.Name, statName))
+				else
+					warn("⚠️ [Admin] Missing leaderstats for " .. t.Name)
+				end
+			end
 
 			-- [[ /clear & /clearall - FIXED ]]
 		elseif command == "/clear" or command == "/clearall" then
