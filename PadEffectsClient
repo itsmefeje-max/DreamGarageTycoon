@@ -23,9 +23,9 @@ local FOV_TIME_OUT = 0.5
 local NOTIFICATION_DURATION = 3.5 
 
 -- 🎉 CONFETTI CONFIG
-local CONFETTI_COUNT = 25       -- How many total stars to spawn (The "Multiply" amount)
-local EXPLOSION_RADIUS = 300    -- How far they fly
-local ANIMATION_DURATION = 2.0  -- How long they float
+local CONFETTI_COUNT = 99      -- How many total stars to spawn (The "Multiply" amount)
+local EXPLOSION_RADIUS = 999    -- How far they fly
+local ANIMATION_DURATION = 4.5  -- How long they float
 
 -- 🎨 COLORS
 local COLOR_SUCCESS = Color3.fromRGB(85, 255, 127) -- Bright Green
@@ -54,7 +54,7 @@ if initialStroke then initialStroke.Transparency = 1 end
 local function explodeConfetti()
 	-- 1. Get all your 5 stars from the folder
 	local templates = templatesFolder:GetChildren()
-	
+
 	if #templates == 0 then
 		warn("No templates found in ConfettiAssets folder!")
 		return
@@ -65,27 +65,27 @@ local function explodeConfetti()
 		task.spawn(function()
 			-- A. PICK A RANDOM STAR FROM YOUR 5
 			local randomTemplate = templates[math.random(1, #templates)]
-			
+
 			if randomTemplate:IsA("ImageLabel") then
 				-- B. CLONE IT
 				local clone = randomTemplate:Clone()
 				clone.Name = "Confetti_Particle"
 				clone.Visible = true
 				clone.Parent = notificationsGui -- Put inside the GUI
-				
+
 				-- C. START POSITION (Uses exactly where you put the template in Studio)
 				-- We add a tiny offset so they don't look perfectly stacked like a pancake
 				clone.Position = randomTemplate.Position
 				clone.Size = UDim2.new(0, 0, 0, 0) -- Start tiny
 				clone.Rotation = math.random(0, 360)
-				
+
 				-- D. CALCULATE RANDOM DIRECTION
 				local angle = math.rad(math.random(0, 360))
 				local distance = math.random(50, EXPLOSION_RADIUS)
-				
+
 				local endX = (math.cos(angle) * distance)
 				local endY = (math.sin(angle) * distance)
-				
+
 				-- Add gravity (fall down a bit)
 				local targetPos = randomTemplate.Position + UDim2.new(0, endX, 0, endY + math.random(50, 150))
 
@@ -95,17 +95,17 @@ local function explodeConfetti()
 					Enum.EasingStyle.Quad, 
 					Enum.EasingDirection.Out
 				)
-				
+
 				local goal = {
 					Position = targetPos,
 					Size = randomTemplate.Size, -- Grow to the size you set in Studio
 					Rotation = clone.Rotation + math.random(-180, 180),
 					ImageTransparency = 1 -- Fade out
 				}
-				
+
 				local tween = TweenService:Create(clone, tweenInfo, goal)
 				tween:Play()
-				
+
 				-- F. CLEANUP
 				tween.Completed:Connect(function()
 					clone:Destroy()
