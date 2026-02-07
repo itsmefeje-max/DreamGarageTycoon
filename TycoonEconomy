@@ -1,5 +1,6 @@
--- [[ SERVER SCRIPT: TycoonEconomy (Accumulator Fix & Audit Fixed) ]]
--- [[ FIXES: "Zero Income" Bug, Name Mismatch Lookup ]]
+-- [[ SERVER SCRIPT: TycoonEconomy (Friend Bonus + Accumulator Fix) ]]
+-- [[ UPDATED: Added Friend Multiplier (10% per friend, max 50%) ]]
+-- [[ FIXES: "Zero Income" Bug, Name Mismatch Lookup, API Lag Prevention ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -10,6 +11,57 @@ local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
 local PAY_INTERVAL = 1
 local profitAccumulator = {} 
+
+-- ============================================================================
+-- 👥 FRIEND BONUS SYSTEM
+-- ============================================================================
+-- We update this on Join/Leave to avoid lagging the payment loop with web calls.
+local function updateFriendStats()
+	local allPlayers = Players:GetPlayers()
+	
+	for _, player in ipairs(allPlayers) do
+		task.spawn(function()
+			local friendCount = 0
+			
+			-- Check against every other player in the server
+			for _, otherPlayer in ipairs(allPlayers) do
+				if player ~= otherPlayer then
+					-- IsFriendsWith is a web call, so we wrap it safely
+					local success, isFriend = pcall(function()
+						return player:IsFriendsWith(otherPlayer.UserId)
+					end)
+					if success and isFriend then
+						friendCount = friendCount + 1
+					end
+				end
+			end
+			
+			-- Cap at 5 friends (50%)
+			local clampedCount = math.min(friendCount, 5)
+			
+			-- Calculate Multiplier (1.0 + 0.1 per friend)
+			local multiplier = 1 + (clampedCount * 0.10)
+			
+			-- Save attributes so other scripts (like UI) can see them
+			player:SetAttribute("ActiveFriends", friendCount)
+			player:SetAttribute("FriendMultiplier", multiplier)
+			
+			-- Optional: Print for debugging
+			-- print("👥 " .. player.Name .. " has " .. friendCount .. " friends. Multiplier: " .. multiplier .. "x")
+		end)
+	end
+end
+
+-- Listeners to update counts dynamically
+Players.PlayerAdded:Connect(function()
+	task.wait(1) -- Wait for data to load
+	updateFriendStats()
+end)
+
+Players.PlayerRemoving:Connect(function()
+	updateFriendStats()
+end)
+-- ============================================================================
 
 local function getLinkedCarValue(pad)
 	local direct = pad:FindFirstChild("LinkedCar")
@@ -36,10 +88,12 @@ task.spawn(function()
 		for _, plot in pairs(TycoonFolder:GetChildren()) do
 			local pendingValue = plot:FindFirstChild("PendingEarnings")
 			local padsFolder = plot:FindFirstChild("Pads")
+			local ownerValue = plot:FindFirstChild("Owner") -- Needed to find the player
 
 			if pendingValue and padsFolder then
 				local plotTotalCPS = 0
 
+				-- 1. Calculate Base Income from Cars
 				for _, pad in pairs(padsFolder:GetChildren()) do
 					local linkedCar = getLinkedCarValue(pad)
 
@@ -68,6 +122,24 @@ task.spawn(function()
 					end
 				end
 
+				-- 2. Apply Friend Multiplier
+				local multiplier = 1 -- Default 1x
+				
+				if ownerValue and ownerValue.Value ~= "" then
+					local player = Players:FindFirstChild(ownerValue.Value)
+					if player then
+						-- Read the attribute we set in updateFriendStats
+						local bonus = player:GetAttribute("FriendMultiplier")
+						if bonus then
+							multiplier = bonus
+						end
+					end
+				end
+				
+				-- Apply the bonus
+				plotTotalCPS = plotTotalCPS * multiplier
+
+				-- 3. Accumulate and Payout
 				if not profitAccumulator[plot] then profitAccumulator[plot] = 0 end
 				profitAccumulator[plot] = profitAccumulator[plot] + plotTotalCPS
 
@@ -78,6 +150,7 @@ task.spawn(function()
 					profitAccumulator[plot] = profitAccumulator[plot] - payout
 				end
 
+				-- Update attribute so TabletHandler sees the Boosted CPS
 				plot:SetAttribute("CurrentCPS", plotTotalCPS)
 			end
 		end
