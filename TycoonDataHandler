@@ -521,6 +521,9 @@ local function InitializePlayer(player)
 
 	-- ✅ INITIALIZE DEFAULT DATA
 	data = data or { Inventory = {}, Layout = {}, PendingEarnings = 0, HighestUnlockedPad = 1, ShopPurchases = {} }
+	data.Inventory = data.Inventory or {}
+	data.Layout = data.Layout or {}
+	data.ShopPurchases = data.ShopPurchases or {}
 
 	cash.Value = data.Bank or 0
 	wallet.Value = data.Wallet or 0

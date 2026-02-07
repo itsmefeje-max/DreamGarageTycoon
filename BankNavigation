@@ -37,9 +37,11 @@ local function formatNumber(n)
 end
 
 local function updateBalance()
-	if balanceLabelV2 and player:FindFirstChild("leaderstats") then
-		local cash = player.leaderstats.Cash.Value
-		balanceLabelV2.Text = "$" .. formatNumber(cash) -- ✅ Using Suffixes now
+	if not balanceLabelV2 then return end
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
+	if cashValue then
+		balanceLabelV2.Text = "$" .. formatNumber(cashValue.Value) -- ✅ Using Suffixes now
 	end
 end
 

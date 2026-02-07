@@ -150,8 +150,10 @@ withdrawBtn.MouseButton1Click:Connect(function()
 
 	-- 5. PREPARE DATA
 	local rawText = amountInput.Text
-	local amount = tonumber(rawText) 
-	local currentBank = player.leaderstats.Cash.Value
+	local amount = tonumber(rawText)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
+	local currentBank = cashValue and cashValue.Value or 0
 
 	-- 6. CLIENT-SIDE CHECK (Fast Fail)
 	if (not amount) or (amount <= 0) or (amount > currentBank) then
@@ -169,7 +171,7 @@ withdrawBtn.MouseButton1Click:Connect(function()
 	end
 
 	-- 7. 🔒 SERVER REQUEST (The Sync)
-	local success, msg = withdrawFunc:InvokeServer(amount, "Transfer")
+	local success, msg = withdrawFunc:InvokeServer(amount, "Withdraw")
 
 	-- 8. STOP VFX (Now that server replied)
 	stopVerifying()
