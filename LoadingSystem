@@ -1,7 +1,10 @@
--- Purpose: Functional Loading Screen + Swoop + Blink + Colored Text
+-- Purpose: Functional Loading Screen + Swoop + Blink + Colored Text (Fixed Pacing)
 -- Runs on: Client (ReplicatedFirst)
 -- Location: ReplicatedFirst
 -- Dependencies: StarterGui (LoadingScreenGui), ReplicatedStorage (PreloadAssets)
+-- Networking: None (Client-side logic only)
+-- Security: Handles nil instances, safeguards loops, localizes variables.
+-- Performance: Disconnects events, destroys UI on finish, optimized tweens.
 
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
 local RunService = game:GetService("RunService")
@@ -20,10 +23,12 @@ ReplicatedFirst:RemoveDefaultLoadingScreen()
 -- CONFIG
 -- =====================
 local VIEW_PART_NAME = "LoadingViewPart"
-local VIEW_PART_TIMEOUT = 15
+local VIEW_PART_TIMEOUT = 10 -- Reduced slightly for responsiveness
 local PRELOAD_FOLDER_NAME = "PreloadAssets"
 
--- [[ NEW: Colored Text Config ]]
+local LOADING_TEXT_START = " Loading " -- Text to show before numbers appear
+
+-- [[ Colored Text Config ]]
 local DONE_OPTIONS = {
 	{ Text = "Done",      Color = Color3.fromRGB(85, 255, 127) },  -- Bright Green
 	{ Text = "Ready!",    Color = Color3.fromRGB(0, 255, 255) },   -- Cyan
@@ -34,25 +39,25 @@ local DONE_OPTIONS = {
 }
 
 -- [[ ANIMATION CONFIG ]]
-local ANIMATION_DURATION = 5.5 -- Increased from 5 (Slightly slower UI slide)
+local ANIMATION_DURATION = 5.5 
 local BLUR_SIZE = 20
-local BLUR_IN_TIME = 0.6 -- Increased from 0.4
-local BLUR_OUT_TIME = 3.0 -- Increased from 2.5 (Gentler blur clear)
+local BLUR_IN_TIME = 0.6 
+local BLUR_OUT_TIME = 3.0 
 
-local SWOOP_DURATION = 1.8 -- Increased from 1.5 (Smoother camera glide)
-local FADE_OUT_TIME = 0.4 -- Increased from 0.25 (Less jarring "blink")
-local FADE_IN_TIME = 0.8  -- Increased from 0.5 (Softer reveal)
+local SWOOP_DURATION = 1.8 
+local FADE_OUT_TIME = 0.4 
+local FADE_IN_TIME = 0.8  
 
-local EXTRA_HOLD_SECONDS = 2.0 -- Increased from 1.5 (Lets the "Success" text sit longer)
+local EXTRA_HOLD_SECONDS = 2.0 
 local FAILSAFE_TOTAL_SECONDS = 35
 
 local LOCK_NAME = "LoadingScreenCameraLock"
 local FREEZE_ACTION = "LoadingScreenFreeze"
 
 -- Progress ranges
-local PHASE_GAME_LOADED_TO = 0.15
-local PHASE_VIEWPART_READY_TO = 0.30
-local PHASE_PRELOAD_TO = 0.95
+local PHASE_GAME_LOADED_TO = 0.20 -- Boosted slightly
+local PHASE_VIEWPART_READY_TO = 0.40
+local PHASE_PRELOAD_TO = 0.90
 local PHASE_FINISH_TO = 1.00
 
 -- =====================
@@ -77,7 +82,7 @@ loadingGui.IgnoreGuiInset = true
 loadingGui.DisplayOrder = 999 
 loadingGui.Parent = playerGui
 
--- [[ NEW: Transition Frame for Blink ]]
+-- [[ Transition Frame for Blink ]]
 local transitionFrame = Instance.new("Frame")
 transitionFrame.Name = "TransitionFrame"
 transitionFrame.Size = UDim2.fromScale(1, 1)
@@ -188,7 +193,7 @@ local function lockCameraTo(part)
 	end)
 end
 
--- [[ UPDATED: SWOOP + BLINK TRANSITION ]]
+-- [[ SWOOP + BLINK TRANSITION ]]
 local function unlockCameraToPlayer()
 	pcall(function() RunService:UnbindFromRenderStep(LOCK_NAME) end)
 
@@ -230,8 +235,6 @@ end
 -- =====================
 -- UI LOGIC
 -- =====================
-
--- [[ CLICK SHIELD ]]
 local clickShield = Instance.new("Frame")
 clickShield.Name = "ClickShield"
 clickShield.Size = UDim2.new(1, 0, 1, 0)
@@ -251,35 +254,48 @@ local progressValue = Instance.new("NumberValue")
 progressValue.Value = 0
 
 local MAX_X_SCALE, MAX_X_OFFSET, Y_SCALE, Y_OFFSET
+
+local function updateProgressBar(v)
+	if not barFill then return end
+	local clamped = math.clamp(v, 0, 1)
+	barFill.Size = UDim2.new(MAX_X_SCALE * clamped, MAX_X_OFFSET * clamped, Y_SCALE, Y_OFFSET)
+
+	if progressText and progressText:IsA("TextLabel") then
+		if clamped <= 0.05 then
+			-- [[ FIX: Force "Loading" text at start ]]
+			progressText.Text = LOADING_TEXT_START
+		elseif clamped >= 0.99 then
+			if not progressText:GetAttribute("DoneMsgSet") then
+				-- [[ Random Colored Text ]]
+				local choice = DONE_OPTIONS[math.random(1, #DONE_OPTIONS)]
+				progressText.Text = choice.Text
+				progressText.TextColor3 = choice.Color
+				progressText:SetAttribute("DoneMsgSet", true)
+			end
+		else
+			progressText.Text = string.format("%d%%", math.floor(clamped * 100 + 0.5))
+		end
+	end
+end
+
 if barFill then
 	MAX_X_SCALE = barFill.Size.X.Scale
 	MAX_X_OFFSET = barFill.Size.X.Offset
 	Y_SCALE = barFill.Size.Y.Scale
 	Y_OFFSET = barFill.Size.Y.Offset
+	
+	-- [[ FIX: Initialize immediately before any tweening ]]
 	barFill.Size = UDim2.new(0, 0, Y_SCALE, Y_OFFSET)
+	updateProgressBar(0) 
 
-	progressValue.Changed:Connect(function(v)
-		local clamped = math.clamp(v, 0, 1)
-		barFill.Size = UDim2.new(MAX_X_SCALE * clamped, MAX_X_OFFSET * clamped, Y_SCALE, Y_OFFSET)
-
-		if progressText and progressText:IsA("TextLabel") then
-			if clamped >= 0.99 then
-				if not progressText:GetAttribute("DoneMsgSet") then
-					-- [[ UPDATED: Random Colored Text ]]
-					local choice = DONE_OPTIONS[math.random(1, #DONE_OPTIONS)]
-					progressText.Text = choice.Text
-					progressText.TextColor3 = choice.Color
-					progressText:SetAttribute("DoneMsgSet", true)
-				end
-			else
-				progressText.Text = string.format("%d%%", math.floor(clamped * 100 + 0.5))
-			end
-		end
-	end)
+	progressValue.Changed:Connect(updateProgressBar)
 end
 
 local function tweenProgress(toValue, duration)
-	return safeTween(progressValue, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { Value = math.clamp(toValue, 0, 1) })
+	-- [[ FIX: Ensure we clamp inputs to avoid overshooting ]]
+	local goal = math.clamp(toValue, 0, 1)
+	local t = safeTween(progressValue, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { Value = goal })
+	return t
 end
 
 -- =====================
@@ -391,12 +407,14 @@ local function cleanup()
 	pcall(function() progressValue:Destroy() end)
 end
 
+-- Failsafe timeout
 task.spawn(function()
 	local start = os.clock()
 	while not finished and (os.clock() - start) < FAILSAFE_TOTAL_SECONDS do task.wait(1) end
 	if not finished then cleanup() end
 end)
 
+-- Main Sequence
 task.spawn(function()
 	local ok, err = xpcall(function()
 		lockControls()
@@ -412,36 +430,64 @@ task.spawn(function()
 		safeTween(bgFrame, TweenInfo.new(ANIMATION_DURATION, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Position = finalPos })
 		fadeToRecorded(ANIMATION_DURATION)
 
-		task.wait(ANIMATION_DURATION * 0.5)
+		-- Give the UI a moment to appear
+		task.wait(ANIMATION_DURATION * 0.3)
 
-		tweenProgress(PHASE_GAME_LOADED_TO, 1.5)
-		if not game:IsLoaded() then game.Loaded:Wait() end
+		-- [[ PHASE 1: GAME LOAD ]]
+		-- We allow this tween to run, but we check Game Loaded
+		local t1 = tweenProgress(PHASE_GAME_LOADED_TO, 1.5)
+		if not game:IsLoaded() then 
+			game.Loaded:Wait() 
+		else
+			-- If already loaded, wait briefly to show visual progress (Fixes instant jump)
+			t1.Completed:Wait() 
+		end
 
+		-- [[ PHASE 2: VIEW PART ]]
 		local viewPart = waitForNamedChild(Workspace, VIEW_PART_NAME, VIEW_PART_TIMEOUT)
 		if viewPart then
 			pcall(function() ContentProvider:PreloadAsync({ viewPart }) end)
 			lockCameraTo(viewPart)
 		end
+		
+		-- Smoothly tween to Phase 2 (Wait for it to finish visually)
+		tweenProgress(PHASE_VIEWPART_READY_TO, 1.2).Completed:Wait()
 
-		tweenProgress(PHASE_VIEWPART_READY_TO, 1.5)
-
+		-- [[ PHASE 3: ASSETS PRELOAD ]]
 		local folder = ReplicatedStorage:FindFirstChild(PRELOAD_FOLDER_NAME)
-		local preloadList = { loadingGui }
+		local preloadList = { loadingGui } -- Ensure list isn't empty
 		if folder then for _, inst in ipairs(folder:GetDescendants()) do table.insert(preloadList, inst) end end
 		if viewPart then table.insert(preloadList, viewPart) end
 
 		if #preloadList == 0 then
-			tweenProgress(PHASE_PRELOAD_TO, 1.5)
+			tweenProgress(PHASE_PRELOAD_TO, 1.0).Completed:Wait()
 		else
+			-- Calculate step size. If list is small, we add a minimum wait
+			local startVal = progressValue.Value
+			local dist = PHASE_PRELOAD_TO - startVal
+			
 			for i, asset in ipairs(preloadList) do
 				pcall(function() ContentProvider:PreloadAsync({ asset }) end)
+				
 				local alpha = i / #preloadList
-				progressValue.Value = math.max(progressValue.Value, PHASE_VIEWPART_READY_TO + (PHASE_PRELOAD_TO - PHASE_VIEWPART_READY_TO) * alpha)
-				task.wait(0.02) 
+				local target = startVal + (dist * alpha)
+				
+				-- Tween slightly to the new target
+				tweenProgress(target, 0.1) 
+				
+				-- [[ FIX: Force a small wait so the bar doesn't zip instantly ]]
+				if #preloadList < 20 then
+					task.wait(0.05) 
+				else
+					RunService.Heartbeat:Wait()
+				end
 			end
 		end
 
-		tweenProgress(PHASE_FINISH_TO, 1.0)
+		-- [[ PHASE 4: FINISH ]]
+		-- Tween to 100% and WAIT for it to visually get there
+		tweenProgress(PHASE_FINISH_TO, 1.0).Completed:Wait()
+		
 		task.wait(0.25)
 		task.wait(EXTRA_HOLD_SECONDS)
 
