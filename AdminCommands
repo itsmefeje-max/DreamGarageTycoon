@@ -1,6 +1,12 @@
--- [[ SERVER SCRIPT: AdminCommands (V10 - Secure Sync) ]]
--- FEATURES: Syncs with TycoonDataHandler to bypass Anti-Wipe protection.
--- LOCATION: ServerScriptService > Script
+-- Purpose: Server-side Admin Commands with secure currency/inventory management
+-- Runs on: Server (ServerScriptService)
+-- Location: ServerScriptService > AdminCommands
+-- Dependencies: TycoonAdminAPI (for clearing data), CarTools, FlyClient
+-- Public API: Chat commands (/give, /fly, /clearwallet, etc.)
+-- Networking: Uses RemoteFunctions via TycoonAdminAPI for data wipes
+-- Security: UserID whitelist, debounces, server-side validation, nil-safe checks
+-- Performance: Caches tools, minimal loop usage
+-- Notes: Assumes leaderstats names are "Cash" (Bank) and "Wallet"
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -236,7 +242,7 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 
-			-- [[ /fly & /unfly ]]
+		-- [[ /fly & /unfly ]]
 		elseif command == "/fly" then
 			local targets = getTargets(player, args[2])
 			for _, t in pairs(targets) do setFlight(t, true) end
@@ -245,7 +251,7 @@ Players.PlayerAdded:Connect(function(player)
 			local targets = getTargets(player, args[2])
 			for _, t in pairs(targets) do setFlight(t, false) end
 
-			-- [[ /givebank & /givewallet ]]
+		-- [[ /givebank & /givewallet ]]
 		elseif command == "/givebank" or command == "/givewallet" then
 			local selector = args[2]
 			local amount = getAmount(args[3])
@@ -263,14 +269,46 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 
-			-- [[ /clear & /clearall - FIXED ]]
+		-- [[ /clearwallet & /clearbank ]]
+		elseif command == "/clearwallet" or command == "/clearbank" then
+			local selector = args[2]
+			local amountArg = args[3] -- Can be "all" or a number
+			
+			if not selector then return end
+			local targets = getTargets(player, selector)
+			
+			-- Map command to stat name: clearbank -> Cash, clearwallet -> Wallet
+			local statName = command == "/clearbank" and "Cash" or "Wallet"
+			
+			for _, t in pairs(targets) do
+				local leaderstats = t:FindFirstChild("leaderstats")
+				if leaderstats then
+					local stat = leaderstats:FindFirstChild(statName)
+					if stat then
+						-- If arg is empty or "all", clear entirely
+						if not amountArg or amountArg:lower() == "all" or amountArg == "*" then
+							stat.Value = 0
+							print(("💸 [Admin] Cleared %s for %s"):format(statName, t.Name))
+						else
+							-- If arg is a number, subtract it safely
+							local amt = tonumber(amountArg)
+							if amt then
+								local old = stat.Value
+								stat.Value = math.max(0, stat.Value - amt)
+								print(("💸 [Admin] Removed %s from %s's %s (New: %s)"):format(amt, t.Name, statName, stat.Value))
+							else
+								warn("⚠️ Invalid amount format. Use number or 'all'")
+							end
+						end
+					end
+				end
+			end
+
+		-- [[ /clear & /clearall - ITEM WIPE ]]
 		elseif command == "/clear" or command == "/clearall" then
 			local targets = getTargets(player, args[2])
 			if TycoonAdminAPI then
 				for _, t in pairs(targets) do
-					-- ✅ THIS IS THE FIX:
-					-- We tell the DataHandler "ForceWipe". 
-					-- This clears the items AND sets the 'ExplicitClear' flag.
 					TycoonAdminAPI:Invoke("ForceWipe", t)
 					print("🗑️ SECURE CLEAR: " .. t.Name)
 				end
