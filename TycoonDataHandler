@@ -14,7 +14,7 @@ local HttpService = game:GetService("HttpService")
 -- ----------------------------------------------------------------------------
 -- ⚙️ CONFIGURATION & CONSTANTS
 -- ----------------------------------------------------------------------------
-local DATA_KEY = "TycoonData_Release_V27_Optimizedd" 
+local DATA_KEY = "TycoonData_Release_V27_Optimizedddddddddddd" 
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 local AUTOSAVE_INTERVAL = 180        
