@@ -335,17 +335,17 @@ local function save(player, isClosing)
 
 		local inventory = {}
 		local invCount = 0
-		local seenInstances = {} 
+		local seenInstances = {}
 
 		local function scanContainer(container)
 			if not container then return end
 			for _, tool in pairs(container:GetChildren()) do
 				if validateTool(tool) and not seenInstances[tool] then
-					seenInstances[tool] = true 
+					seenInstances[tool] = true
 					if invCount < MAX_INVENTORY_SIZE then
 						local id = tool:GetAttribute("ToolId")
 						if id then
-							table.insert(inventory, id) 
+							table.insert(inventory, id)
 							invCount += 1
 						end
 					end
@@ -353,14 +353,13 @@ local function save(player, isClosing)
 			end
 		end
 
-		-- ✅ CRITICAL FIX: Only scan StarterGear.
-		-- Scanning Backpack AND StarterGear caused exponential duplication (double-counting).
-		-- StarterGear is the persistent container; items are cloned there by giveTool.
-		scanContainer(player:FindFirstChild("StarterGear"))
+		-- ✅ PRIMARY: Backpack + Character capture all owned copies (including duplicates).
+		-- StarterGear is only used as a fallback when no live tools exist.
+		scanContainer(player:FindFirstChild("Backpack"))
+		scanContainer(player.Character)
 
-		-- Fallback: If StarterGear is empty (unexpected), try Backpack, but only then.
 		if invCount == 0 then
-			scanContainer(player:FindFirstChild("Backpack"))
+			scanContainer(player:FindFirstChild("StarterGear"))
 		end
 
 		local layout = {}

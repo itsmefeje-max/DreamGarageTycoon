@@ -277,14 +277,28 @@ PersistenceBindable.OnInvoke = function(action, player, data)
 		if type(data) == "table" then
 			if data.SeedVersion and data.SeedVersion ~= session.SeedVersion then
 				session.Purchased = {}
-			elseif type(data.Purchased) == "table" then
-				session.Purchased = normalizePurchased(data.Purchased)
+				session.LocalSeed = nil
+				session.Cache = generateStockConfiguration(session.SeedVersion)
 			else
-				session.Purchased = normalizePurchased(data)
+				if type(data.Purchased) == "table" then
+					session.Purchased = normalizePurchased(data.Purchased)
+				else
+					session.Purchased = normalizePurchased(data)
+				end
+
+				if type(data.LocalSeed) == "number" then
+					session.LocalSeed = data.LocalSeed
+					session.Cache = generateStockConfiguration(session.LocalSeed)
+				else
+					session.LocalSeed = nil
+					session.Cache = generateStockConfiguration(session.SeedVersion)
+				end
 			end
 			print("✅ [Shop] Loaded purchases for " .. player.Name)
 		elseif didReset then
 			session.Purchased = {}
+			session.LocalSeed = nil
+			session.Cache = generateStockConfiguration(session.SeedVersion)
 		end
 
 	elseif action == "Get" then
@@ -292,6 +306,7 @@ PersistenceBindable.OnInvoke = function(action, player, data)
 		if PlayerSessions[uid] then
 			return {
 				SeedVersion = PlayerSessions[uid].SeedVersion,
+				LocalSeed = PlayerSessions[uid].LocalSeed,
 				Purchased = PlayerSessions[uid].Purchased,
 			}
 		end
