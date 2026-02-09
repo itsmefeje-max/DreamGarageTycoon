@@ -380,8 +380,15 @@ local function init()
 			task.wait(1)
 			if gui.Enabled then
 				local now = os.time()
-				local secondsLeft = 300 - (now % 300)
-				timerLabel.Text = string.format("New Cars will restock at : %02d:%02d", math.floor(secondsLeft/60), secondsLeft%60)
+				local target = currentState and currentState.NextRestock
+				if target then
+					local secondsLeft = math.max(target - now, 0)
+					timerLabel.Text = string.format(
+						"New Cars will restock at : %02d:%02d",
+						math.floor(secondsLeft / 60),
+						secondsLeft % 60
+					)
+				end
 			end
 		end
 	end)
