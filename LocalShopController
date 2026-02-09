@@ -1,6 +1,8 @@
 -- [[ LOCAL SCRIPT: LocalShopController ]]
 -- UPDATED: Fixes "Insufficient Money" error when spamming buy button.
 -- NOW: Correctly identifies "Slow down" vs "No Funds".
+-- UI UPDATE: Supports CarImageContainer & Removed Wiggle Effect.
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -290,13 +292,21 @@ local function init()
 	for _, carName in ipairs(SHOP_CARS) do
 		local card = scrollFrame:WaitForChild(carName, 5)
 		if card then
-			local specificImageName = carName .. "-Image"
-			local imageButton = card:FindFirstChild(specificImageName)
-			if not imageButton then imageButton = card:FindFirstChild("CarImage") end 
+			-- 1. Look for Container first (New Structure)
+			local container = card:FindFirstChild("CarImageContainer")
+			local imageButton = nil
 
-			if imageButton then
-				Kit.Tween:SetupWiggle(imageButton)
+			if container then
+				-- 2. Find CarImage inside container
+				imageButton = container:FindFirstChild("CarImage")
+			else
+				-- 3. Fallback: Old structure (Direct child)
+				local specificImageName = carName .. "-Image"
+				imageButton = card:FindFirstChild(specificImageName)
+				if not imageButton then imageButton = card:FindFirstChild("CarImage") end
 			end
+
+			-- (Removed SetupWiggle call here)
 
 			local buyBtn = card:FindFirstChild("BuyButton")
 			if buyBtn then
