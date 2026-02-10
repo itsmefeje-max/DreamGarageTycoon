@@ -21,6 +21,12 @@ if not addedLabel then
 	return -- Stop the script to prevent further errors
 end
 
+-- Preserve Studio-authored layout settings (do NOT override these in code).
+local originalAddedPosition = addedLabel.Position
+local originalAddedAnchor = addedLabel.AnchorPoint
+local originalAddedSize = addedLabel.Size
+local originalAddedAlignment = addedLabel.TextXAlignment
+
 -- 2. WAIT FOR DATA
 local leaderstats = player:WaitForChild("leaderstats")
 local walletValue = leaderstats:WaitForChild("Wallet")
@@ -70,7 +76,13 @@ local function showFeedback(amount, isGain)
 		addedLabel.TextColor3 = TEXT_COLOR_LOSS
 	end
 
-	-- 3. Show Immediately (UIListLayout will adjust instantly)
+	-- 3. Show Immediately
+	-- IMPORTANT: We keep this label Visible at all times so parent layouts
+	-- (especially UIListLayout) don't reflow and shift the balance position.
+	addedLabel.Position = originalAddedPosition
+	addedLabel.AnchorPoint = originalAddedAnchor
+	addedLabel.Size = originalAddedSize
+	addedLabel.TextXAlignment = originalAddedAlignment
 	addedLabel.Visible = true
 	addedLabel.TextTransparency = 0
 	if addedLabel:FindFirstChild("UIStroke") then
@@ -90,13 +102,7 @@ local function showFeedback(amount, isGain)
 			TweenService:Create(addedLabel.UIStroke, tweenInfo, {Transparency = 1}):Play()
 		end
 
-		-- Hide completely after tween finishes to collapse the layout
-		activeTween.Completed:Connect(function()
-			-- Double check we haven't started a new animation during the fade
-			if addedLabel.TextTransparency >= 0.9 then
-				addedLabel.Visible = false
-			end
-		end)
+		-- Keep visible after fade so layout size stays stable (no UI jumping)
 	end)
 end
 
@@ -109,7 +115,8 @@ end
 
 -- 1. Init: Hide the added label by default
 updateDisplay()
-addedLabel.Visible = false
+-- Keep this visible with full transparency so no layout shift occurs.
+addedLabel.Visible = true
 addedLabel.TextTransparency = 1
 
 -- 2. Changed Event

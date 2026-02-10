@@ -43,6 +43,8 @@ local HOVER_VOLUME = 0.5
 local isClaiming = false
 local isHoveringMap = {} 
 local lastProjectedAmount = 0 
+local claimRequestId = 0
+local pendingClaimByPlot = {}
 
 -- 🛠️ HELPER: The "Z-Offset" Fix & Visibility Logic
 local function enableClicking(gui, part)
@@ -153,6 +155,34 @@ local function isCloseEnough(targetPart)
 	return dist <= CLICK_DISTANCE
 end
 
+local function getClaimPartFromPlotName(plotName)
+	local plot = TycoonFolder:FindFirstChild(plotName)
+	local model = plot and plot:FindFirstChild("ClaimEarnings")
+	return model and (model:FindFirstChild("ClaimPart") or model:FindFirstChild("Earnings"))
+end
+
+local function showClaimFailure(part, reason)
+	local labels = {
+		TooFar = "Too Far!",
+		Cooldown = "Slow Down!",
+		NoEarnings = "No Earnings!",
+		NotOwner = "Access Denied!",
+		InvalidPlot = "Plot Missing!",
+		NoCharacter = "Character Missing!",
+		MissingState = "Tablet Not Ready!",
+		Unknown = "Claim Failed!",
+	}
+	local msg = labels[reason] or labels.Unknown
+	local sfx = Instance.new("Sound")
+	sfx.SoundId = FAIL_SOUND_ID
+	sfx.Parent = SoundService
+	sfx:Play()
+	game.Debris:AddItem(sfx, 1)
+	if part then
+		spawnFloatingText(part, msg, Color3.fromRGB(255, 80, 80))
+	end
+end
+
 -- ============================================================================
 -- 🕵️ LOGIC CONNECTIONS
 -- ============================================================================
@@ -204,12 +234,18 @@ local function setupClientTablet(plot)
 			local s = Instance.new("Sound");
 			s.SoundId = CLICK_SOUND_ID; s.Parent = SoundService; s:Play(); game.Debris:AddItem(s,1)
 
-			spawnFloatingText(claimPart, "+$"..pendingVal.Value, Color3.fromRGB(85, 255, 127))
+			claimRequestId += 1
+			local requestId = claimRequestId
+			pendingClaimByPlot[plot.Name] = requestId
+			TabletEvent:FireServer("Claim", plot.Name, requestId)
 
-			TabletEvent:FireServer("Claim", plot.Name)
-
-			task.wait(1.5) 
-			isClaiming = false
+			task.delay(2.5, function()
+				if pendingClaimByPlot[plot.Name] == requestId then
+					pendingClaimByPlot[plot.Name] = nil
+					isClaiming = false
+					showClaimFailure(claimPart, "Unknown")
+				end
+			end)
 		end)
 	end
 
@@ -237,6 +273,32 @@ local function setupClientTablet(plot)
 		end)
 	end
 end
+
+TabletEvent.OnClientEvent:Connect(function(action, plotName, wasSuccessful, payload, requestId)
+	if action ~= "ClaimResult" then return end
+
+	if pendingClaimByPlot[plotName] ~= requestId then
+		return
+	end
+
+	pendingClaimByPlot[plotName] = nil
+	isClaiming = false
+
+	local part = getClaimPartFromPlotName(plotName)
+	if wasSuccessful then
+		local amount = tonumber(payload) or 0
+		local sfx = Instance.new("Sound")
+		sfx.SoundId = SUCCESS_SOUND_ID
+		sfx.Parent = SoundService
+		sfx:Play()
+		game.Debris:AddItem(sfx, 1)
+		if part then
+			spawnFloatingText(part, "+$" .. amount, Color3.fromRGB(85, 255, 127))
+		end
+	else
+		showClaimFailure(part, payload)
+	end
+end)
 
 -- ============================================================================
 -- 💰 PURCHASE SUCCESS LISTENER
