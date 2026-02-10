@@ -70,7 +70,9 @@ local function showFeedback(amount, isGain)
 		addedLabel.TextColor3 = TEXT_COLOR_LOSS
 	end
 
-	-- 3. Show Immediately (UIListLayout will adjust instantly)
+	-- 3. Show Immediately
+	-- IMPORTANT: We keep this label Visible at all times so parent layouts
+	-- (especially UIListLayout) don't reflow and shift the balance position.
 	addedLabel.Visible = true
 	addedLabel.TextTransparency = 0
 	if addedLabel:FindFirstChild("UIStroke") then
@@ -90,13 +92,7 @@ local function showFeedback(amount, isGain)
 			TweenService:Create(addedLabel.UIStroke, tweenInfo, {Transparency = 1}):Play()
 		end
 
-		-- Hide completely after tween finishes to collapse the layout
-		activeTween.Completed:Connect(function()
-			-- Double check we haven't started a new animation during the fade
-			if addedLabel.TextTransparency >= 0.9 then
-				addedLabel.Visible = false
-			end
-		end)
+		-- Keep visible after fade so layout size stays stable (no UI jumping)
 	end)
 end
 
@@ -109,8 +105,13 @@ end
 
 -- 1. Init: Hide the added label by default
 updateDisplay()
-addedLabel.Visible = false
+-- Keep this visible with full transparency so no layout shift occurs.
+addedLabel.Visible = true
 addedLabel.TextTransparency = 1
+
+-- Keep text anchored consistently so value-length changes don't look like movement.
+label.TextXAlignment = Enum.TextXAlignment.Left
+addedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 -- 2. Changed Event
 walletValue.Changed:Connect(function(newValue)
