@@ -188,32 +188,52 @@ TycoonFolder.ChildAdded:Connect(setupTablet)
 -- ============================================================================
 -- 📡 REMOTE HANDLING (CLAIM LOGIC)
 -- ============================================================================
-TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
+TabletEvent.OnServerEvent:Connect(function(player, action, plotName, requestId)
+	local function respondClaim(success, payload)
+		TabletEvent:FireClient(player, "ClaimResult", plotName, success, payload, requestId)
+	end
+
 	local plot = TycoonFolder:FindFirstChild(plotName)
-	if not plot then return end
+	if not plot then
+		if action == "Claim" then respondClaim(false, "InvalidPlot") end
+		return
+	end
 
 	-- Security Check 1: Ownership
-	if plot.Owner.Value ~= player.Name then return end
+	if plot.Owner.Value ~= player.Name then
+		if action == "Claim" then respondClaim(false, "NotOwner") end
+		return
+	end
 
 	local pendingVal = plot:FindFirstChild("PendingEarnings")
 	local model = plot:FindFirstChild("ClaimEarnings")
 	local claimPart = nil
 	if model then claimPart = model:FindFirstChild("ClaimPart") end
 
-	if not pendingVal or not claimPart then return end
+	if not pendingVal or not claimPart then
+		if action == "Claim" then respondClaim(false, "MissingState") end
+		return
+	end
 
 	-- 🛡️ Security Check 2: Distance Verification
-	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+		if action == "Claim" then respondClaim(false, "NoCharacter") end
+		return
+	end
 
 	local distance = (player.Character.HumanoidRootPart.Position - claimPart.Position).Magnitude
 	if distance > MAX_CLAIM_DISTANCE then
+		if action == "Claim" then respondClaim(false, "TooFar") end
 		return
 	end
 
 	if action == "Claim" then
 		-- Cooldown
 		local lastClaim = playerCooldowns[player.UserId] or 0
-		if (os.clock() - lastClaim) < CLAIM_COOLDOWN then return end
+		if (os.clock() - lastClaim) < CLAIM_COOLDOWN then
+			respondClaim(false, "Cooldown")
+			return
+		end
 
 		local amount = pendingVal.Value
 
@@ -225,9 +245,11 @@ TabletEvent.OnServerEvent:Connect(function(player, action, plotName)
 			end
 			playerCooldowns[player.UserId] = os.clock()
 			playSound(claimPart, SUCCESS_SOUND, 1.0)
+			respondClaim(true, amount)
 		else
 			playerCooldowns[player.UserId] = os.clock()
 			playSound(claimPart, FAIL_SOUND, 0.8)
+			respondClaim(false, "NoEarnings")
 		end
 
 	elseif action == "Prompt2X" then
