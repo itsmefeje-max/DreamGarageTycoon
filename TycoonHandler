@@ -118,9 +118,11 @@ Players.PlayerRemoving:Connect(function(player)
 
 			if listener then listener:Disconnect() end
 
-			-- ✅ NOW we safely release the plot
-			plot.Owner.Value = ""
-			print("🔓 Released " .. plotName)
+			-- ✅ NOW we safely release + clean the plot
+			-- This prevents abandoned cars/pad occupancy from persisting when
+			-- nobody immediately claims the plot after a player leaves.
+			wipePlot(plot)
+			print("🔓 Released + wiped " .. plotName)
 
 			if didSave then
 				print("✅ Data Saved for " .. player.Name .. ". Plot released safely.")
