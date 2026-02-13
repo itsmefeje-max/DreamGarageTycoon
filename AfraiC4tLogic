@@ -456,4 +456,27 @@ local function setupATM()
 	end
 end
 
+local function setupBankTransferPriority()
+	task.spawn(function()
+		local bankGui = playerGui:WaitForChild("BankGui", 10)
+		if not bankGui or not bankGui:IsA("ScreenGui") then return end
+
+		bankGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+			if bankGui.Enabled and (isInteracting or isLeaving) then
+				stopInteraction()
+			end
+		end)
+
+		local transferFrame = bankGui:FindFirstChild("TransferFrame")
+		if transferFrame and transferFrame:IsA("GuiObject") then
+			transferFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+				if transferFrame.Visible and (isInteracting or isLeaving) then
+					stopInteraction()
+				end
+			end)
+		end
+	end)
+end
+
+setupBankTransferPriority()
 setupATM()
