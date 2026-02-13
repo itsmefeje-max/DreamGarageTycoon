@@ -140,19 +140,19 @@ end
 -- ============================================================================
 if maxBtn then
 	maxBtn.MouseButton1Click:Connect(function()
-		-- 1. Get Current "Cash" (Bank Balance)
-		local currentBank = 0
-		if player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Cash") then
-			currentBank = player.leaderstats.Cash.Value
+		-- 1. Get Current ATM Balance (withdraw source)
+		local currentATM = 0
+		if player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("ATMBalance") then
+			currentATM = player.leaderstats.ATMBalance.Value
 		end
 
 		-- 2. Aesthetic Click
 		playSound(CLICK_SOUND_ID)
 
 		-- 3. Auto-Fill Input
-		if currentBank > 0 then
+		if currentATM > 0 then
 			-- We use math.floor to ensure no decimals break the transfer
-			amountInput.Text = tostring(math.floor(currentBank))
+			amountInput.Text = tostring(math.floor(currentATM))
 			print("✅ Max Amount Set: " .. amountInput.Text)
 		else
 			amountInput.Text = "0"
