@@ -30,7 +30,15 @@ local CLICK_SOUND_ID = "rbxassetid://9083627113"
 
 -- ⚙️ STATE VARIABLES
 local currentVerifyTween = nil 
+local currentVerifyStrokeTweens = {}
 local isCoolingDown = false 
+
+local function safeCancelTween(tween)
+	if not tween then return end
+	pcall(function()
+		tween:Cancel()
+	end)
+end
 
 -- ============================================================================
 -- 🛠️ HELPER FUNCTIONS (Formatting & Audio)
@@ -64,12 +72,18 @@ end
 
 local function animateResult(uiObject)
 	if not uiObject then return end
+	local strokes = uiObject:GetDescendants()
 
 	-- 1. Show
 	uiObject.Visible = true
 	uiObject.ZIndex = 20 
 	if uiObject:IsA("ImageLabel") then uiObject.ImageTransparency = 0 end
 	if uiObject:IsA("TextLabel") then uiObject.TextTransparency = 0 end
+	for _, child in ipairs(strokes) do
+		if child:IsA("UIStroke") then
+			child.Transparency = 0
+		end
+	end
 
 	-- 2. Wait
 	task.wait(2)
@@ -78,10 +92,17 @@ local function animateResult(uiObject)
 	local goals = {}
 	if uiObject:IsA("ImageLabel") then goals.ImageTransparency = 1 end
 	if uiObject:IsA("TextLabel") then goals.TextTransparency = 1 end
+	for _, child in ipairs(strokes) do
+		if child:IsA("UIStroke") then
+			TweenService:Create(child, TweenInfo.new(0.5), {Transparency = 1}):Play()
+		end
+	end
 
-	local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
-	tweenOut:Play()
-	tweenOut.Completed:Wait()
+	if next(goals) then
+		local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
+		tweenOut:Play()
+		tweenOut.Completed:Wait()
+	end
 
 	uiObject.Visible = false
 end
@@ -90,6 +111,10 @@ local function startVerifying()
 	if not VerifyLabel then return end
 	VerifyLabel.Visible = true
 	VerifyLabel.ZIndex = 20
+	for _, tween in ipairs(currentVerifyStrokeTweens) do
+		safeCancelTween(tween)
+	end
+	currentVerifyStrokeTweens = {}
 
 	local pulseInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 	local goals = {}
@@ -102,17 +127,41 @@ local function startVerifying()
 		VerifyLabel.TextTransparency = 1 
 		goals.TextTransparency = 0 
 	end
+	for _, child in ipairs(VerifyLabel:GetDescendants()) do
+		if child:IsA("UIStroke") then
+			child.Transparency = 1
+			table.insert(currentVerifyStrokeTweens, TweenService:Create(child, pulseInfo, {Transparency = 0}))
+		end
+	end
 
-	currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
-	currentVerifyTween:Play()
+	if next(goals) then
+		currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
+		currentVerifyTween:Play()
+	else
+		currentVerifyTween = nil
+	end
+	for _, tween in ipairs(currentVerifyStrokeTweens) do tween:Play() end
 end
 
 local function stopVerifying()
 	if currentVerifyTween then
-		currentVerifyTween:Cancel()
+		safeCancelTween(currentVerifyTween)
 		currentVerifyTween = nil
 	end
-	if VerifyLabel then VerifyLabel.Visible = false end
+	for _, tween in ipairs(currentVerifyStrokeTweens) do
+		safeCancelTween(tween)
+	end
+	currentVerifyStrokeTweens = {}
+	if VerifyLabel then
+		for _, child in ipairs(VerifyLabel:GetDescendants()) do
+			if child:IsA("UIStroke") then
+				child.Transparency = 1
+			end
+		end
+		if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 1 end
+		if VerifyLabel:IsA("TextLabel") then VerifyLabel.TextTransparency = 1 end
+		VerifyLabel.Visible = false
+	end
 end
 
 -- ============================================================================
@@ -202,3 +251,11 @@ end)
 if VerifyLabel then VerifyLabel.Visible = false end
 if SuccessLabel then SuccessLabel.Visible = false end
 if ErrorLabel then ErrorLabel.Visible = false end
+
+if VerifyLabel then
+	for _, child in ipairs(VerifyLabel:GetDescendants()) do
+		if child:IsA("UIStroke") then
+			child.Transparency = 1
+		end
+	end
+end
