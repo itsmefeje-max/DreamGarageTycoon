@@ -93,6 +93,7 @@ local isLeaving = false
 local currentDialogueJob = nil 
 local buttonConnections = {} 
 local buttonHoverConnections = {} 
+local hiddenObjects = {}
 local controls = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
 
 -- ============================================================================
@@ -137,6 +138,26 @@ local function clearConnections()
 		if conn then conn:Disconnect() end
 	end
 	buttonHoverConnections = {}
+end
+
+-- Minimal focus-mode: only hide specific floating objects without touching Bank/Transfer GUIs
+local function setFocusMode(active)
+	if active then
+		hiddenObjects = {}
+		for _, obj in pairs(playerGui:GetDescendants()) do
+			if obj:IsA("GuiObject") and obj.Name == "FriendBoost" and obj.Visible then
+				obj.Visible = false
+				table.insert(hiddenObjects, obj)
+			end
+		end
+	else
+		for _, obj in pairs(hiddenObjects) do
+			if obj and obj.Parent and obj:IsA("GuiObject") then
+				obj.Visible = true
+			end
+		end
+		hiddenObjects = {}
+	end
 end
 
 local function playSound(id, vol)
@@ -194,6 +215,7 @@ local function stopInteraction()
 
 	if currentDialogueJob then task.cancel(currentDialogueJob) end
 	clearConnections() 
+	setFocusMode(false)
 
 	camera.CameraType = Enum.CameraType.Custom
 	if controls then controls:Enable() end
@@ -284,7 +306,8 @@ local function startInteraction(npcModel)
 	local container = myGui:FindFirstChild(CONTAINER_ID, true) 
 	if not container then warn("❌ Missing Frame") stopInteraction() return end
 
-	
+	setFocusMode(true)
+
 	-- ✅ MOVEMENT FIX: Kill speed and velocity to prevent "Walking in Place" bug
 	if player.Character then
 		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
