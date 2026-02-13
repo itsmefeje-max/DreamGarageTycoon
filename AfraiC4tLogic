@@ -331,6 +331,14 @@ local function startInteraction(npcModel)
 	end
 
 	if controls then controls:Disable() end
+
+	local myGui = playerGui:WaitForChild(GUI_ID, 5)
+	if not myGui then warn("❌ Missing GUI") stopInteraction() return end
+
+	myGui.Enabled = true
+	local container = myGui:FindFirstChild(CONTAINER_ID, true) 
+	if not container then warn("❌ Missing Frame") stopInteraction() return end
+
 	setFocusMode(true)
 	
 	-- ✅ MOVEMENT FIX: Kill speed and velocity to prevent "Walking in Place" bug
@@ -350,13 +358,6 @@ local function startInteraction(npcModel)
 
 	camera.CameraType = Enum.CameraType.Scriptable
 	TweenService:Create(camera, TWEEN_INFO, {CFrame = camPart.CFrame}):Play()
-
-	local myGui = playerGui:WaitForChild(GUI_ID, 5)
-	if not myGui then warn("❌ Missing GUI") stopInteraction() return end
-
-	myGui.Enabled = true
-	local container = myGui:FindFirstChild(CONTAINER_ID, true) 
-	if not container then warn("❌ Missing Frame") stopInteraction() return end
 
 	container.Visible = true
 
@@ -499,7 +500,13 @@ local function setupATM()
 		if prompt then
 			print("✅ ATM Ready.")
 			prompt.Triggered:Connect(function()
-				startInteraction(npc)
+				local ok, err = pcall(function()
+					startInteraction(npc)
+				end)
+				if not ok then
+					warn("❌ ATM interaction error:", err)
+					stopInteraction() -- fail-safe: ensure hidden UI and controls are restored
+				end
 			end)
 		end
 	end
