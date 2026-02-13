@@ -35,13 +35,6 @@ local currentVerifyTween = nil
 local currentVerifyStrokeTweens = {}
 local isCoolingDown = false 
 
-local function safeCancelTween(tween)
-	if not tween then return end
-	pcall(function()
-		tween:Cancel()
-	end)
-end
-
 -- ============================================================================
 -- 🛠️ ANIMATION FUNCTIONS (Unchanged)
 -- ============================================================================
@@ -84,11 +77,9 @@ local function animateResult(uiObject)
 		end
 	end
 
-	if next(goals) then
-		local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
-		tweenOut:Play()
-		tweenOut.Completed:Wait()
-	end
+	local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
+	tweenOut:Play()
+	tweenOut.Completed:Wait()
 
 	uiObject.Visible = false
 end
@@ -100,7 +91,7 @@ local function startVerifying()
 	VerifyLabel.ZIndex = 20
 	VerifyLabel.Rotation = 0 
 	for _, tween in ipairs(currentVerifyStrokeTweens) do
-		safeCancelTween(tween)
+		tween:Cancel()
 	end
 	currentVerifyStrokeTweens = {}
 
@@ -118,22 +109,18 @@ local function startVerifying()
 		end
 	end
 
-	if next(goals) then
-		currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
-		currentVerifyTween:Play()
-	else
-		currentVerifyTween = nil
-	end
+	currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
+	currentVerifyTween:Play()
 	for _, tween in ipairs(currentVerifyStrokeTweens) do tween:Play() end
 end
 
 local function stopVerifying()
 	if currentVerifyTween then
-		safeCancelTween(currentVerifyTween)
+		currentVerifyTween:Cancel()
 		currentVerifyTween = nil
 	end
 	for _, tween in ipairs(currentVerifyStrokeTweens) do
-		safeCancelTween(tween)
+		tween:Cancel()
 	end
 	currentVerifyStrokeTweens = {}
 	if VerifyLabel then
