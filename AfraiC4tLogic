@@ -93,8 +93,6 @@ local isLeaving = false
 local currentDialogueJob = nil 
 local buttonConnections = {} 
 local buttonHoverConnections = {} 
-local hiddenGuis = {}
-local hiddenObjects = {}
 local controls = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
 
 -- ============================================================================
@@ -139,58 +137,6 @@ local function clearConnections()
 		if conn then conn:Disconnect() end
 	end
 	buttonHoverConnections = {}
-end
-
--- 👁️ FOCUS MODE (HIDE OTHER UI DURING NPC TALK)
-local function toggleNamedGuiObjects(shouldHide, objectName)
-	if shouldHide then
-		for _, obj in pairs(playerGui:GetDescendants()) do
-			if obj:IsA("GuiObject") and obj.Name == objectName and obj.Visible then
-				obj.Visible = false
-				table.insert(hiddenObjects, obj)
-			end
-		end
-	else
-		for _, obj in pairs(hiddenObjects) do
-			if obj and obj.Parent and obj:IsA("GuiObject") then
-				obj.Visible = true
-			end
-		end
-		hiddenObjects = {}
-	end
-end
-
-local ALWAYS_VISIBLE_GUIS = {
-	["Balance Indicator"] = true,
-	["BankGui"] = true, -- Keep bank transfer flow available during NPC conversation
-}
-
-local function toggleOtherGuis(shouldHide)
-	if shouldHide then
-		hiddenGuis = {}
-		for _, otherGui in pairs(playerGui:GetChildren()) do
-			if otherGui:IsA("ScreenGui")
-				and otherGui.Name ~= GUI_ID
-				and otherGui.Enabled == true
-				and not ALWAYS_VISIBLE_GUIS[otherGui.Name] then
-
-				otherGui.Enabled = false
-				table.insert(hiddenGuis, otherGui)
-			end
-		end
-	else
-		for _, otherGui in pairs(hiddenGuis) do
-			if otherGui and otherGui.Parent then
-				otherGui.Enabled = true
-			end
-		end
-		hiddenGuis = {}
-	end
-end
-
-local function setFocusMode(active)
-	toggleOtherGuis(active)
-	toggleNamedGuiObjects(active, "FriendBoost")
 end
 
 local function playSound(id, vol)
@@ -248,7 +194,6 @@ local function stopInteraction()
 
 	if currentDialogueJob then task.cancel(currentDialogueJob) end
 	clearConnections() 
-	setFocusMode(false)
 
 	camera.CameraType = Enum.CameraType.Custom
 	if controls then controls:Enable() end
@@ -339,7 +284,6 @@ local function startInteraction(npcModel)
 	local container = myGui:FindFirstChild(CONTAINER_ID, true) 
 	if not container then warn("❌ Missing Frame") stopInteraction() return end
 
-	setFocusMode(true)
 	
 	-- ✅ MOVEMENT FIX: Kill speed and velocity to prevent "Walking in Place" bug
 	if player.Character then
