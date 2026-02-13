@@ -21,10 +21,10 @@ local CLICK_SOUND_ID = "rbxassetid://9083627113"
 button.MouseButton1Click:Connect(function()
 	print("🖱️ MAX Button Clicked")
 
-	-- 1. Get Current Balance
-	local currentBank = 0
-	if player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Cash") then
-		currentBank = player.leaderstats.Cash.Value
+	-- 1. Get Current ATM Balance (withdraw source)
+	local currentATM = 0
+	if player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("ATMBalance") then
+		currentATM = player.leaderstats.ATMBalance.Value
 	end
 
 	-- 2. Play Click Sound (Aesthetic)
@@ -37,9 +37,9 @@ button.MouseButton1Click:Connect(function()
 
 	-- 3. Update Input Field ONLY
 	if AmountInput then
-		if currentBank > 0 then
+		if currentATM > 0 then
 			-- Use math.floor to ensure clean integer values
-			AmountInput.Text = tostring(math.floor(currentBank))
+			AmountInput.Text = tostring(math.floor(currentATM))
 			print("✅ Input auto-filled with: " .. AmountInput.Text)
 		else
 			AmountInput.Text = "0"
