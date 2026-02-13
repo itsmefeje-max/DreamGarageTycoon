@@ -46,6 +46,10 @@ local balanceLabel = debugFind(mainWindow, "BalanceLabel")
 local headerContainer = debugFind(mainWindow, "HeaderContainer")
 local transferButton = mainWindow:FindFirstChild("TransferButton", true)
 local backButton = transferFrame and transferFrame:FindFirstChild("BackButton", true)
+local transferExitButton = transferFrame and (
+	transferFrame:FindFirstChild("ExitButton", true)
+		or transferFrame:FindFirstChild("CloseButton", true)
+)
 
 if not headerContainer then return end
 
@@ -285,6 +289,10 @@ end
 -- Apply hover to known buttons
 addHover(openButton)
 addHover(closeButton)
+if transferButton then addHover(transferButton) end
+if transferFrame then addHover(transferFrame) end
+if backButton then addHover(backButton) end
+if transferExitButton then addHover(transferExitButton) end
 
 -- ✅ Apply hover to Max button too (does NOT touch click behavior)
 local maxButton =
@@ -302,3 +310,4 @@ end
 -- ============================================================================
 if cash then cash.Changed:Connect(updateDisplay) end
 task.spawn(loadAvatar)
+
