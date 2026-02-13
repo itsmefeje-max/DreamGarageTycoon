@@ -119,7 +119,7 @@ end)
 local function setButtonsState(isActive)
 	local myGui = playerGui:FindFirstChild(GUI_ID)
 	if not myGui then return end
-	
+
 	for _, btnID in ipairs(ALL_BUTTON_IDS) do
 		local btn = myGui:FindFirstChild(btnID, true)
 		if btn then
@@ -226,7 +226,7 @@ local function typewrite(label, text, onComplete)
 			task.wait(TYPEWRITER_SPEED)
 		end
 		label.MaxVisibleGraphemes = -1 
-		
+
 		-- ✅ TRIGGER CALLBACK IF PROVIDED
 		if onComplete and isInteracting then
 			onComplete()
@@ -251,9 +251,9 @@ local function stopInteraction()
 	if player.Character then
 		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
 		local humanoid = player.Character:FindFirstChild("Humanoid")
-		
+
 		if hrp then hrp.Anchored = false end
-		
+
 		-- ✅ MOVEMENT FIX: Restore speed so they can walk again
 		if humanoid then humanoid.WalkSpeed = 16 end
 	end
@@ -294,7 +294,7 @@ local function animateButton(btn)
 		local connLeave = btn.MouseLeave:Connect(function()
 			TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = normalSize}):Play()
 		end)
-		
+
 		table.insert(buttonHoverConnections, connEnter)
 		table.insert(buttonHoverConnections, connLeave)
 	end
@@ -327,16 +327,16 @@ local function startInteraction(npcModel)
 
 	if controls then controls:Disable() end
 	setFocusMode(true)
-	
+
 	-- ✅ MOVEMENT FIX: Kill speed and velocity to prevent "Walking in Place" bug
 	if player.Character then
 		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
 		local humanoid = player.Character:FindFirstChild("Humanoid")
-		
+
 		if humanoid then 
 			humanoid.WalkSpeed = 0 -- Forces animation to Idle
 		end
-		
+
 		if hrp then
 			hrp.Velocity = Vector3.zero -- Stops sliding
 			hrp.Anchored = true 
@@ -406,14 +406,14 @@ local function startInteraction(npcModel)
 			if isLeaving then return end
 			isLeaving = true 
 			clearConnections() 
-			
+
 			-- ✅ HIDE BUTTONS IMMEDIATELY ON LEAVE
 			setButtonsState(false)
 
 			if dialogueLabel then
 				local coloredName = "<font color='" .. NAME_COLOR .. "'>" .. player.Name .. "</font>"
 				local goodbyeMsg = "Thank you for stopping by, " .. coloredName .. "."
-				
+
 				-- No callback needed here as we are stopping interaction after
 				typewrite(dialogueLabel, goodbyeMsg)
 			end
@@ -424,13 +424,13 @@ local function startInteraction(npcModel)
 		connectBtn(BTN_INQUIRY_ID, function()
 			-- ✅ HIDE BUTTONS WHILE EXPLAINING
 			setButtonsState(false)
-			
+
 			if dialogueLabel then
 				local guide = "<b>MY GUIDE:</b>\n\n" ..
 					"<font color='"..NUM_COLOR.."'><b>1.</b></font> <font color='"..MONEY_COLOR.."'><b>EARN:</b></font> Your Plot generates income.\n" ..
 					"<font color='"..NUM_COLOR.."'><b>2.</b></font> <font color='"..WITHDRAW_COLOR.."'><b>WITHDRAW:</b></font> Move earnings to Wallet.\n" ..
 					"<font color='"..NUM_COLOR.."'><b>3.</b></font> <font color='"..SPEND_COLOR.."'><b>SPEND:</b></font> Use Cash for upgrades."
-				
+
 				typewrite(dialogueLabel, guide, function()
 					setButtonsState(true) -- SHOW BUTTONS WHEN DONE
 				end)
@@ -446,7 +446,7 @@ local function startInteraction(npcModel)
 				end)
 				return
 			end
-			
+
 			-- ✅ HIDE BUTTONS DURING TRANSACTION
 			setButtonsState(false)
 
