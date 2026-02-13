@@ -49,6 +49,7 @@ end
 
 local function animateResult(uiObject)
 	if not uiObject then return end
+	local stroke = uiObject:FindFirstChildOfClass("UIStroke")
 
 	-- 1. FORCE VISIBLE
 	uiObject.Visible = true
@@ -56,6 +57,7 @@ local function animateResult(uiObject)
 
 	if uiObject:IsA("ImageLabel") then uiObject.ImageTransparency = 0 end
 	if uiObject:IsA("TextLabel") then uiObject.TextTransparency = 0 end
+	if stroke then stroke.Transparency = 0 end
 
 	-- 2. Wait
 	task.wait(2)
@@ -67,9 +69,11 @@ local function animateResult(uiObject)
 
 	local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
 	tweenOut:Play()
+	if stroke then TweenService:Create(stroke, TweenInfo.new(0.5), {Transparency = 1}):Play() end
 	tweenOut.Completed:Wait()
 
 	uiObject.Visible = false
+	if stroke then stroke.Transparency = 1 end
 end
 
 local function startVerifying()
@@ -84,11 +88,18 @@ local function startVerifying()
 
 	local pulseInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 	local goals = {}
+	local strokeGoals = nil
+	local verifyStroke = VerifyLabel:FindFirstChildOfClass("UIStroke")
 	if VerifyLabel:IsA("ImageLabel") then goals.ImageTransparency = 0 end
 	if VerifyLabel:IsA("TextLabel") then goals.TextTransparency = 0 end
+	if verifyStroke then
+		verifyStroke.Transparency = 1
+		strokeGoals = TweenService:Create(verifyStroke, pulseInfo, {Transparency = 0})
+	end
 
 	currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
 	currentVerifyTween:Play()
+	if strokeGoals then strokeGoals:Play() end
 end
 
 local function stopVerifying()
@@ -97,8 +108,11 @@ local function stopVerifying()
 		currentVerifyTween = nil
 	end
 	if VerifyLabel then
+		local verifyStroke = VerifyLabel:FindFirstChildOfClass("UIStroke")
+		if verifyStroke then verifyStroke.Transparency = 1 end
 		VerifyLabel.Visible = false
-		if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 0 end
+		if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 1 end
+		if VerifyLabel:IsA("TextLabel") then VerifyLabel.TextTransparency = 1 end
 	end
 end
 
@@ -197,6 +211,10 @@ withdrawBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Initialize
-if VerifyLabel then VerifyLabel.Visible = false end
+if VerifyLabel then
+	VerifyLabel.Visible = false
+	local verifyStroke = VerifyLabel:FindFirstChildOfClass("UIStroke")
+	if verifyStroke then verifyStroke.Transparency = 1 end
+end
 if SuccessLabel then SuccessLabel.Visible = false end
 if ErrorLabel then ErrorLabel.Visible = false end

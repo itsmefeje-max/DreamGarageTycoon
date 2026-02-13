@@ -29,6 +29,7 @@ local walletValue = leaderstats:WaitForChild("Wallet")
 local currentBalance = walletValue.Value
 local scriptStartTime = os.clock()
 local activeTween = nil -- Tracks the current animation so we can override it
+local activeStrokeTween = nil
 local hideJob = nil -- Tracks the timer
 
 -- ============================================================================
@@ -60,6 +61,7 @@ local function showFeedback(amount, isGain)
 	-- 1. Reset: Cancel any running animations to prevent glitches
 	if hideJob then task.cancel(hideJob) hideJob = nil end
 	if activeTween then activeTween:Cancel() activeTween = nil end
+	if activeStrokeTween then activeStrokeTween:Cancel() activeStrokeTween = nil end
 
 	-- 2. Update Content
 	if isGain then
@@ -89,7 +91,8 @@ local function showFeedback(amount, isGain)
 
 		-- Tween Stroke (if you have one)
 		if addedLabel:FindFirstChild("UIStroke") then
-			TweenService:Create(addedLabel.UIStroke, tweenInfo, {Transparency = 1}):Play()
+			activeStrokeTween = TweenService:Create(addedLabel.UIStroke, tweenInfo, {Transparency = 1})
+			activeStrokeTween:Play()
 		end
 
 		-- Keep visible after fade so layout size stays stable (no UI jumping)
@@ -108,6 +111,9 @@ updateDisplay()
 -- Keep this visible with full transparency so no layout shift occurs.
 addedLabel.Visible = true
 addedLabel.TextTransparency = 1
+if addedLabel:FindFirstChild("UIStroke") then
+	addedLabel.UIStroke.Transparency = 1
+end
 
 -- Keep text anchored consistently so value-length changes don't look like movement.
 label.TextXAlignment = Enum.TextXAlignment.Left
