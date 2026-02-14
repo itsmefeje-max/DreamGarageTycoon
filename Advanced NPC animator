@@ -1,0 +1,148 @@
+-- Purpose: Advanced NPC Animation Cycler
+-- Runs on: Server (typically)
+-- Location: Inside the NPC Model (Script)
+-- Dependencies: NPC must have a Humanoid and an Animator
+-- Notes: Handles multiple IDs, smooth crossfading, and dynamic duration.
+
+local npc = script.Parent
+local humanoid = npc:WaitForChild("Humanoid")
+local animator = humanoid:WaitForChild("Animator")
+
+-- CONFIGURATION
+local FADE_TIME = 0.5 -- Time in seconds to blend between animations
+local MIN_DURATION = 3 -- Minimum time to play an animation (prevents fast flickering)
+local RANDOMIZE = true -- Set to true to pick random dances, false for order
+
+-- The complete list of IDs you provided
+local animationIds = {
+	3333499508, -- Monkey
+	4841405708, -- Happy
+	5917459365, -- Floss Dance
+	5915690960, -- High Wave
+	3337994105, -- Godlike
+	5104344710, -- Hero Landing
+	3334538554, -- Tilt
+	5937560570, -- Old Town Road
+	6869766175, -- Samba
+	6797888062, -- Hips Poppin'
+	3333136415, -- Side to Side
+	5915648917, -- Break Dance
+	7199000883, -- Wake Up Call
+	7422779536, -- On The Outside
+	5918726674, -- Dolphin Dance
+	6862001787, -- Cha Cha
+	3338055167, -- Stadium
+	3344650532, -- Wave
+	3716633898, -- Twirl
+	5937558680, -- HOLIDAY Dance
+	4349242221, -- Shuffle
+	6797890377, -- Take Me Under
+	3333331310, -- Fashionable
+	7465946930, -- Flowing Breeze
+	3338042785, -- Greatest
+	4940564896, -- Jumping Wave
+	4265701731, -- Fast Hands
+	5918728267, -- Rodeo Dance
+	5230598276, -- Beckon
+	3333387824, -- Bodybuilder
+	3361426436, -- Dizzy
+	4049551434, -- Tree
+	5895324424, -- Jumping Cheer
+	7404878500, -- Dancin' Shoes
+	5915714366, -- Rock On
+	6862022283, -- Block Partier
+	4841403964, -- Power Blast
+	7942890105, -- Cobra Arms
+	6797891807, -- It Ain't My Fault
+	4210116953, -- Zombie
+	3338010159, -- T
+	4212455378, -- Dorky Dance
+	5915713518, -- Panini Dance
+	3361276673, -- Top Rock
+	3338025566, -- Robot
+	7422807549, -- Saturday Dance
+	4555808220, -- Keeping Time
+	3303391864, -- Around Town
+	7942885103, -- AOK 
+	3333432454, -- Fancy Feet
+	6532839007, -- Drum Solo
+	4101966434, -- Idol
+	6532134724, -- Rock Guitar
+	4349285876, -- Y
+	6531483720, -- Drum Master
+	3338066331, -- Jacks
+	6533093212, -- Rock Star
+	4555782893, -- Air Dance
+	7422797678, -- Up and Down
+	7422527690, -- Drummer Moves
+	3361481910, -- Swish
+	7465997989, -- Swan Dance
+	3338083565, -- Louder
+	3695333486, -- Hype Dance
+	3695373233, -- Superhero Reveal
+	5915712534, -- Country Line Dance
+}
+
+-- UTILITY FUNCTION: Load and Play
+local currentTrack = nil
+local animationObject = Instance.new("Animation")
+
+local function playAnimation(id)
+	-- 1. Set the ID
+	animationObject.AnimationId = "rbxassetid://" .. id
+
+	-- 2. Load the track
+	-- Note: We wrap in pcall in case an ID is deleted/invalid
+	local success, newTrack = pcall(function()
+		return animator:LoadAnimation(animationObject)
+	end)
+
+	if not success or not newTrack then
+		warn("Failed to load animation ID: " .. id)
+		return
+	end
+
+	-- 3. Configure Track
+	newTrack.Priority = Enum.AnimationPriority.Action
+	newTrack.Looped = true -- We loop it so it plays for the full duration we choose
+
+	-- 4. Play with fade
+	newTrack:Play(FADE_TIME)
+
+	-- 5. Stop previous track smoothly
+	if currentTrack then
+		currentTrack:Stop(FADE_TIME)
+	end
+
+	currentTrack = newTrack
+
+	-- 6. Calculate how long to wait
+	-- We wait for the animation to load its length property
+	local length = newTrack.Length
+	if length == 0 then
+		-- Fallback if length hasn't loaded immediately
+		task.wait(0.2)
+		length = newTrack.Length
+	end
+
+	-- If the animation is naturally very long, we play it fully.
+	-- If it's short, we play it for at least MIN_DURATION.
+	local waitTime = math.max(length, MIN_DURATION)
+
+	-- Wait for the determined time before switching to the next
+	task.wait(waitTime)
+end
+
+-- MAIN LOOP
+while true do
+	if RANDOMIZE then
+		-- Pick a random ID
+		local randomId = animationIds[math.random(1, #animationIds)]
+		playAnimation(randomId)
+	else
+		-- Play in order
+		for _, id in ipairs(animationIds) do
+			playAnimation(id)
+		end
+	end
+end
