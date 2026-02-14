@@ -1,13 +1,13 @@
--- [[ LOCAL SCRIPT: SettingsClient (CENTERED POP) ]]
--- Purpose: Settings UI + Music Toggle + Center Pop Animation
+-- [[ LOCAL SCRIPT: SettingsClient (CENTERED POP - INSTANT CLOSE) ]]
+-- Purpose: Settings UI + Music Toggle + Center Pop Open / Instant Close
 -- Runs on: Client (StarterPlayerScripts or StarterGui)
 -- Location: StarterGui/SettingsGui
 -- Dependencies: SoundService, TweenService, Debris
 -- Public API: None (Internal Logic)
 -- Networking: None (Client-side UI logic only)
 -- Security: N/A (Visuals only)
--- Performance: Tweens used for animations; Sound debris cleanup included.
--- Notes: Hover sounds removed per request. Visual hovers retained.
+-- Performance: Tweens used for open animation only.
+-- Notes: Close animation removed per request. Open animation retained.
 
 local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
@@ -45,10 +45,9 @@ local CONFIG = {
 
 	-- Animation Settings
 	Anim = {
-		OpenTime = 1.0,   -- [UPDATED] 1 Second
-		CloseTime = 1.0,  -- [UPDATED] 1 Second
-		StartScale = 0.0, -- [UPDATED] Starts at 0 size to prevent "snapping" when closing
-		EasingStyle = Enum.EasingStyle.Exponential, -- [UPDATED] Smoother for long animations
+		OpenTime = 1.0,   -- [KEPT] 1 Second fade in
+		StartScale = 0.0, -- Starts at 0 size
+		EasingStyle = Enum.EasingStyle.Exponential,
 	},
 }
 
@@ -96,49 +95,45 @@ local function setOtherGuisEnabled(enabled)
 	end
 end
 
--- 🟢 WINDOW VISIBILITY (Centered Pop)
+-- 🟢 WINDOW VISIBILITY (Centered Pop Open / Instant Close)
 local currentTween = nil
 
 local function setWindowVisible(isOpen)
-	if currentTween then currentTween:Cancel() end
+	-- Cancel any running animation immediately
+	if currentTween then 
+		currentTween:Cancel() 
+		currentTween = nil
+	end
+
 	local A = CONFIG.Anim
 
 	if isOpen then
-		-- 1. Setup
+		-- >> OPENING LOGIC (ANIMATED) <<
+
+		-- 1. Setup Initial State
 		window.Visible = true
 		openButton.Visible = false
-		uiScale.Scale = A.StartScale -- Sets scale to 0 initially
-
+		uiScale.Scale = A.StartScale -- Reset to 0 so it can pop up
 		playUiSound("Open")
 		setOtherGuisEnabled(false)
 
-		-- 2. Animate Scale to 1 (From Center)
-		-- Uses 'Out' so it slows down as it reaches full size
+		-- 2. Animate Scale to 1
 		local info = TweenInfo.new(A.OpenTime, A.EasingStyle, Enum.EasingDirection.Out)
 		currentTween = TweenService:Create(uiScale, info, { Scale = 1 })
 		currentTween:Play()
 
 	else
-		-- 1. Animate Scale down (To Center)
+		-- >> CLOSING LOGIC (INSTANT) <<
+
 		playUiSound("Click")
 
-		-- Uses 'Out' direction here effectively too (Reversed In is tricky with Expon), 
-		-- but 'Out' + 'Scale=0' usually looks cleanest for closing.
-		-- Let's stick to standard logic: 'In' typically accelerates out.
-		-- For 1 second, 'Quint' or 'Exponential' In/Out works best.
-		local info = TweenInfo.new(A.CloseTime, A.EasingStyle, Enum.EasingDirection.In) 
-		currentTween = TweenService:Create(uiScale, info, { Scale = A.StartScale }) -- Goes to 0
-		currentTween:Play()
+		-- 1. Instant Cleanup (No Tween)
+		window.Visible = false
+		openButton.Visible = true
+		uiScale.Scale = 1 -- Reset scale just in case
 
-		-- 2. Cleanup
-		currentTween.Completed:Connect(function(playbackState)
-			if playbackState == Enum.PlaybackState.Completed then
-				window.Visible = false
-				openButton.Visible = true
-				uiScale.Scale = 1 
-				setOtherGuisEnabled(true)
-			end
-		end)
+		-- 2. Restore other GUIs immediately
+		setOtherGuisEnabled(true)
 	end
 end
 
@@ -153,7 +148,10 @@ local function setMusicMuted(shouldBeMuted)
 	local shopMusic = SoundService:FindFirstChild("ShopMusic_Internal")
 	if shopMusic then shopMusic.Volume = vol end
 
-	playUiSound("Click")
+	-- Only play sound if the window is actually visible (prevents spam on init)
+	if window.Visible then
+		playUiSound("Click")
+	end
 end
 
 -- 🖱️ BUTTON SETUP
@@ -182,6 +180,6 @@ setupButton(btnMusicOn, function() setMusicMuted(true) end)
 setupButton(btnMusicOff, function() setMusicMuted(false) end)
 
 -- Default State
-setMusicMuted(false)
 window.Visible = false
 openButton.Visible = true
+-- (Optional) Mute logic ensures buttons are correct, but we don't need to force volume here if defaults are set in SoundService
