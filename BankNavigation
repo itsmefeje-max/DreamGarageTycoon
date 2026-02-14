@@ -34,6 +34,11 @@ local currentVerifyTween = nil
 local currentVerifyStrokeTweens = {}
 local isCoolingDown = false 
 
+-- 🎨 HOVER DIM CONFIG (matches Bank UI behavior)
+local HOVER_TWEEN = TweenInfo.new(0.2)
+local NORMAL_COLOR = Color3.fromRGB(255, 255, 255)
+local DIM_COLOR = Color3.fromRGB(200, 200, 200)
+
 -- ============================================================================
 -- 🛠️ HELPER FUNCTIONS (Formatting & Audio)
 -- ============================================================================
@@ -45,6 +50,27 @@ local function playSound(soundId)
 	sound.Parent = SoundService 
 	sound:Play()
 	game.Debris:AddItem(sound, 3)
+end
+
+local function addHover(btn)
+	if not btn then return end
+
+	local prop
+	if btn:IsA("ImageButton") or btn:IsA("ImageLabel") then
+		prop = "ImageColor3"
+	elseif btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("Frame") then
+		prop = "BackgroundColor3"
+	end
+
+	if not prop then return end
+
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, HOVER_TWEEN, {[prop] = DIM_COLOR}):Play()
+	end)
+
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, HOVER_TWEEN, {[prop] = NORMAL_COLOR}):Play()
+	end)
 end
 
 -- ✅ NEW: Parses "10k", "5.5m", "1,000" into numbers
@@ -165,6 +191,12 @@ end
 -- ============================================================================
 updateTransferBalance()
 
+addHover(withdrawBtn)
+
+if maxBtn then
+	addHover(maxBtn)
+end
+
 if maxBtn then
 	maxBtn.MouseButton1Click:Connect(function()
 		local currentBank = 0
@@ -263,4 +295,3 @@ if VerifyLabel then
 		end
 	end
 end
-
