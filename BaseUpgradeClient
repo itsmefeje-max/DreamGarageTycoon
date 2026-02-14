@@ -1,52 +1,177 @@
 -- [[ LOCAL SCRIPT: BaseUpgradeClient ]]
--- Purpose: Waits for the Server signal and opens the BaseUpgradeUI.
+-- Purpose: Opens UI, Freezes Player, Blurs Screen, and Hides FriendBoost.
 -- Location: StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting") -- ✅ Added for Blur
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
 local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
-
--- Wait for the specific remote to exist (created by the server script)
 local OpenEvent = Remotes:WaitForChild("OpenBaseUpgrade")
 
--- ⚙️ UI SETTINGS (Must match your Studio setup exactly)
+-- 📦 REQUIRE KIT (For Sound & Animations)
+local Kit
+pcall(function()
+	Kit = require(ReplicatedStorage:WaitForChild("ShopFrontendKit", 5))
+end)
+
+-- ⚙️ CONFIGURATION
 local UI_NAME = "BaseUpgradeUI"
 local FRAME_NAME = "MainFrame"
 local CLOSE_BTN_NAME = "CloseButton"
+local BLUR_SIZE = 24 -- How blurry the background gets
 
--- 🔓 OPEN LOGIC
-OpenEvent.OnClientEvent:Connect(function()
-	local gui = PlayerGui:FindFirstChild(UI_NAME)
-	if gui then
-		local frame = gui:FindFirstChild(FRAME_NAME)
-		if frame then
-			gui.Enabled = true
-			frame.Visible = true
-			print("✅ [Client] Base Upgrade UI Opened")
-		else
-			warn("⚠️ Frame '"..FRAME_NAME.."' not found in " .. UI_NAME)
+-- 🛡️ STATE TRACKING
+local hiddenGuis = {} 
+local hiddenObjects = {} -- Specifically for FriendBoost
+local currentBlur = nil 
+
+-- ============================================================================
+-- 🛠️ HELPER FUNCTIONS
+-- ============================================================================
+
+-- 1. BLUR EFFECT
+local function setBlur(enable)
+	if enable then
+		if not currentBlur then
+			currentBlur = Instance.new("BlurEffect")
+			currentBlur.Size = 0
+			currentBlur.Parent = Lighting
+			currentBlur.Name = "UpgradeBlur"
+		end
+		TweenService:Create(currentBlur, TweenInfo.new(0.5), {Size = BLUR_SIZE}):Play()
+	else
+		if currentBlur then
+			local t = TweenService:Create(currentBlur, TweenInfo.new(0.5), {Size = 0})
+			t:Play()
+			t.Completed:Connect(function()
+				if currentBlur then currentBlur:Destroy() currentBlur = nil end
+			end)
+		end
+	end
+end
+
+-- 2. HIDE SPECIFIC OBJECTS (Like FriendBoost)
+local function toggleNamedGuiObjects(shouldHide, objectName)
+	if shouldHide then
+		for _, obj in pairs(PlayerGui:GetDescendants()) do
+			if obj:IsA("GuiObject") and obj.Name == objectName and obj.Visible then
+				obj.Visible = false
+				table.insert(hiddenObjects, obj)
+			end
 		end
 	else
-		warn("⚠️ ScreenGui '"..UI_NAME.."' not found in PlayerGui")
+		for _, obj in pairs(hiddenObjects) do
+			if obj and obj.Parent and obj:IsA("GuiObject") then
+				obj.Visible = true
+			end
+		end
+		hiddenObjects = {}
 	end
+end
+
+-- 3. HIDE OTHER SCREEN GUIS (Focus Mode)
+local function toggleOtherGuis(shouldHide)
+	local myGui = PlayerGui:FindFirstChild(UI_NAME)
+
+	if shouldHide then
+		hiddenGuis = {}
+		for _, otherGui in pairs(PlayerGui:GetChildren()) do
+			if otherGui:IsA("ScreenGui") 
+				and otherGui ~= myGui 
+				and otherGui.Enabled == true 
+				and otherGui.Name ~= "Balance Indicator"
+				and otherGui.Name ~= "TouchGui"
+				and otherGui.Name ~= "Chat"
+			then
+				otherGui.Enabled = false
+				table.insert(hiddenGuis, otherGui)
+			end
+		end
+	else
+		for _, otherGui in pairs(hiddenGuis) do
+			if otherGui and otherGui.Parent then
+				otherGui.Enabled = true
+			end
+		end
+		hiddenGuis = {}
+	end
+end
+
+-- 4. FREEZE PLAYER
+local function setMovement(active)
+	local char = player.Character
+	if char and char:FindFirstChild("Humanoid") then
+		if not active then
+			-- FREEZE
+			char.Humanoid.WalkSpeed = 0
+			char.Humanoid.JumpPower = 0
+		else
+			-- UNFREEZE (Restore defaults)
+			char.Humanoid.WalkSpeed = 16
+			char.Humanoid.JumpPower = 50
+		end
+	end
+end
+
+-- ============================================================================
+-- 🔄 MAIN VISIBILITY TOGGLE
+-- ============================================================================
+local function setVisible(isOpen)
+	local gui = PlayerGui:WaitForChild(UI_NAME, 5)
+	if not gui then return warn("⚠️ BaseUpgradeUI not found") end
+
+	local frame = gui:WaitForChild(FRAME_NAME, 5)
+	if not frame then return warn("⚠️ MainFrame not found") end
+
+	if isOpen then
+		-- OPENING SEQUENCE
+		toggleOtherGuis(true)
+		toggleNamedGuiObjects(true, "FriendBoost") -- ✅ Hides Friend Boost
+		setBlur(true)                              -- ✅ Adds Blur
+		setMovement(false)                         -- ✅ Stops Player
+
+		gui.Enabled = true
+		frame.Visible = true
+
+		if Kit and Kit.Sound then Kit.Sound:Play("Open") end
+	else
+		-- CLOSING SEQUENCE
+		gui.Enabled = false
+		frame.Visible = false
+
+		setBlur(false)
+		toggleOtherGuis(false)
+		toggleNamedGuiObjects(false, "FriendBoost")
+		setMovement(true) -- ✅ Restores Movement
+	end
+end
+
+-- 📡 LISTEN FOR SERVER
+OpenEvent.OnClientEvent:Connect(function()
+	setVisible(true)
 end)
 
--- 🔒 CLOSE LOGIC (Auto-connects when the UI loads)
+-- ❌ CLOSE BUTTON LOGIC
 task.spawn(function()
 	local gui = PlayerGui:WaitForChild(UI_NAME, 10)
 	if not gui then return end
 
+	-- ✅ FORCE HIDE ON JOIN (Fixes "Visible in Studio" issue)
+	gui.Enabled = false 
 	local frame = gui:WaitForChild(FRAME_NAME, 10)
-	if not frame then return end
+	if frame then frame.Visible = false end
 
-	local closeBtn = frame:WaitForChild(CLOSE_BTN_NAME, 10)
-	if closeBtn then
-		closeBtn.MouseButton1Click:Connect(function()
-			gui.Enabled = false
-			frame.Visible = false
-		end)
+	-- Setup Button
+	local closeBtn = frame and frame:WaitForChild(CLOSE_BTN_NAME, 10)
+	if not closeBtn then return end
+
+	if Kit and Kit.Tween and Kit.Tween.SetupButton then
+		Kit.Tween:SetupButton(closeBtn, function() setVisible(false) end)
+	else
+		closeBtn.MouseButton1Click:Connect(function() setVisible(false) end)
 	end
 end)
