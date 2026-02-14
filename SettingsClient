@@ -1,11 +1,12 @@
--- [[ LOCAL SCRIPT: SettingsClient ]]
--- Purpose: Handles Settings UI visibility and sounds.
--- Note: NO animations, NO position changes. Uses Studio layout exactly.
+-- [[ LOCAL SCRIPT: SettingsClient (CENTERED POP) ]]
+-- Purpose: Settings UI + Music Toggle + Center Pop Animation
+-- Fix: Forces AnchorPoint to (0.5, 0.5) so it scales from the middle, not the corner.
 
 local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService") -- Used ONLY for color hover
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -16,96 +17,160 @@ local openButton = screenGui:WaitForChild("OpenButton")
 local window = screenGui:WaitForChild("SettingsWindow")
 local closeButton = window:WaitForChild("CloseButton")
 
+-- 🎵 MUSIC BUTTONS
+local btnMusicOn = window:WaitForChild("MusicOnButton")
+local btnMusicOff = window:WaitForChild("MusicOffButton")
+
+-- 🔊 MUSIC TARGET
+local gameTheme = SoundService:WaitForChild("GameTheme", 5)
+
 -- ⚙️ CONFIG
 local CONFIG = {
 	Colors = {
-		Hover = Color3.fromRGB(200, 200, 200), -- Simple dim on hover
+		Hover = Color3.fromRGB(210, 210, 210),
 		Normal = Color3.fromRGB(255, 255, 255)
 	},
 	Sounds = {
-		Open = "rbxassetid://4676738150",
+		Open  = "rbxassetid://4676738150",
 		Click = "rbxassetid://9083627113",
 		Hover = "rbxassetid://6895079853"
-	}
+	},
+	DefaultVolume = 0.5,
+
+	-- Animation Settings
+	Anim = {
+		OpenTime = 0.3,
+		CloseTime = 0.2,
+		StartScale = 0.8,
+		EasingStyle = Enum.EasingStyle.Back,
+	},
 }
 
--- 🔊 AUDIO SYSTEM
-local function playSound(name)
+-- 🔊 SFX HELPER
+local function playUiSound(name)
 	local id = CONFIG.Sounds[name]
 	if not id then return end
-
 	local s = Instance.new("Sound")
 	s.SoundId = id
 	s.Volume = 0.5
 	s.Parent = SoundService
 	s:Play()
-	game.Debris:AddItem(s, 2)
+	Debris:AddItem(s, 2)
 end
 
--- 🟢 VISIBILITY LOGIC (Instant, No Animation)
-local function setWindowVisible(isOpen)
-	window.Visible = isOpen
+-- ✅ ENSURE UISCALE EXISTS
+local uiScale = window:FindFirstChildOfClass("UIScale")
+if not uiScale then
+	uiScale = Instance.new("UIScale")
+	uiScale.Parent = window
+end
 
-	-- Toggle Open Button Visibility
-	openButton.Visible = not isOpen 
+-- ✅ FORCE CENTER ANCHORING (THE FIX)
+-- This ensures the scale animation starts from the center, not top-left.
+window.AnchorPoint = Vector2.new(0.5, 0.5)
+window.Position = UDim2.new(0.5, 0, 0.5, 0)
 
-	if isOpen then
-		playSound("Open")
-
-		-- HIDE OTHER GUIS (Prevents overlap, affects Visibility only)
-		for _, gui in pairs(playerGui:GetChildren()) do
-			if gui:IsA("ScreenGui") and gui ~= screenGui and gui.Name ~= "TouchGui" then
+-- 🟢 HIDE/RESTORE OTHER GUIS
+local function setOtherGuisEnabled(enabled)
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") and gui ~= screenGui and gui.Name ~= "TouchGui" then
+			if enabled == false then
 				if gui:GetAttribute("WasEnabled") == nil then
 					gui:SetAttribute("WasEnabled", gui.Enabled)
 				end
 				gui.Enabled = false
-			end
-		end
-	else
-		playSound("Click")
-
-		-- RESTORE OTHER GUIS
-		for _, gui in pairs(playerGui:GetChildren()) do
-			if gui:IsA("ScreenGui") and gui:GetAttribute("WasEnabled") then
-				gui.Enabled = true
-				gui:SetAttribute("WasEnabled", nil)
+			else
+				local was = gui:GetAttribute("WasEnabled")
+				if was ~= nil then
+					gui.Enabled = was
+					gui:SetAttribute("WasEnabled", nil)
+				end
 			end
 		end
 	end
 end
 
--- 🖱️ BUTTON INPUT
-local function setupButton(btn)
-	if not btn:IsA("GuiButton") then return end
+-- 🟢 WINDOW VISIBILITY (Centered Pop)
+local currentTween = nil
 
-	-- Hover Effect (Color Only - PC Only)
+local function setWindowVisible(isOpen)
+	if currentTween then currentTween:Cancel() end
+	local A = CONFIG.Anim
+
+	if isOpen then
+		-- 1. Setup
+		window.Visible = true
+		openButton.Visible = false
+		uiScale.Scale = A.StartScale -- Start small
+
+		playUiSound("Open")
+		setOtherGuisEnabled(false)
+
+		-- 2. Animate Scale to 1 (From Center)
+		local info = TweenInfo.new(A.OpenTime, A.EasingStyle, Enum.EasingDirection.Out)
+		currentTween = TweenService:Create(uiScale, info, { Scale = 1 })
+		currentTween:Play()
+
+	else
+		-- 1. Animate Scale down (To Center)
+		playUiSound("Click")
+
+		local info = TweenInfo.new(A.CloseTime, A.EasingStyle, Enum.EasingDirection.In)
+		currentTween = TweenService:Create(uiScale, info, { Scale = A.StartScale })
+		currentTween:Play()
+
+		-- 2. Cleanup
+		currentTween.Completed:Connect(function(playbackState)
+			if playbackState == Enum.PlaybackState.Completed then
+				window.Visible = false
+				openButton.Visible = true
+				uiScale.Scale = 1 
+				setOtherGuisEnabled(true)
+			end
+		end)
+	end
+end
+
+-- 🎵 MUSIC TOGGLE LOGIC
+local function setMusicMuted(shouldBeMuted)
+	btnMusicOn.Visible = not shouldBeMuted
+	btnMusicOff.Visible = shouldBeMuted
+
+	local vol = shouldBeMuted and 0 or CONFIG.DefaultVolume
+	if gameTheme then gameTheme.Volume = vol end
+
+	local shopMusic = SoundService:FindFirstChild("ShopMusic_Internal")
+	if shopMusic then shopMusic.Volume = vol end
+
+	playUiSound("Click")
+end
+
+-- 🖱️ BUTTON SETUP
+local function setupButton(btn, onClick)
+	if not btn or not btn:IsA("GuiButton") then return end
+
 	if not UserInputService.TouchEnabled then
 		btn.MouseEnter:Connect(function()
-			playSound("Hover")
-			TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = CONFIG.Colors.Hover}):Play()
+			playUiSound("Hover")
+			TweenService:Create(btn, TweenInfo.new(0.12), { ImageColor3 = CONFIG.Colors.Hover }):Play()
 		end)
-
 		btn.MouseLeave:Connect(function()
-			TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = CONFIG.Colors.Normal}):Play()
+			TweenService:Create(btn, TweenInfo.new(0.12), { ImageColor3 = CONFIG.Colors.Normal }):Play()
 		end)
 	end
 
-	-- Click (Instant Action)
 	btn.MouseButton1Click:Connect(function()
-		if btn == openButton then
-			setWindowVisible(true)
-		elseif btn == closeButton then
-			setWindowVisible(false)
-		else
-			playSound("Click")
-		end
+		if onClick then onClick() end
 	end)
 end
 
--- 🚀 INIT
-setupButton(openButton)
-setupButton(closeButton)
+-- 🚀 INITIALIZATION
+setupButton(openButton, function() setWindowVisible(true) end)
+setupButton(closeButton, function() setWindowVisible(false) end)
+setupButton(btnMusicOn, function() setMusicMuted(true) end)
+setupButton(btnMusicOff, function() setMusicMuted(false) end)
 
 -- Default State
+setMusicMuted(false)
 window.Visible = false
 openButton.Visible = true
