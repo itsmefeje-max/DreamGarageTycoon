@@ -1,27 +1,31 @@
 -- [[ SERVER SCRIPT: BaseUpgradeServer ]]
--- Purpose: Connects your ProximityPrompt to the networking system.
--- Location: Inside the NPC Model (Same place as the ProximityPrompt)
+-- Purpose: Listens for the interaction on this specific NPC and tells the client to open the UI.
+-- Location: Inside workspace.NPCS.iDrankClxroxx (Sibling to the ProximityPrompt)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
--- 1. SETUP REMOTE
--- We use your existing "ShopRemotes" folder.
+-- 1. SETUP REMOTE (Connects to your existing system)
 local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
 local RemoteName = "OpenBaseUpgrade"
 
--- Check if remote exists, creating it if you haven't yet
 local OpenEvent = Remotes:FindFirstChild(RemoteName)
 if not OpenEvent then
 	OpenEvent = Instance.new("RemoteEvent")
 	OpenEvent.Name = RemoteName
 	OpenEvent.Parent = Remotes
+	print("✅ [Server] Created new RemoteEvent: " .. RemoteName)
 end
 
--- 2. CONNECT PROMPT
--- Since the script is inside the NPC, we look for the prompt in the same parent
+-- 2. FIND PROMPT (Sibling check)
+-- Since this script is inside the NPC Model, script.Parent IS the NPC.
 local npc = script.Parent
 local prompt = npc:WaitForChild("ProximityPrompt")
 
+print("✅ [Server] Script connected to Prompt on: " .. npc.Name)
+
+-- 3. HANDLE INTERACTION
 prompt.Triggered:Connect(function(player)
+	print("🟢 [Server] Triggered by " .. player.Name .. ". Opening UI...")
 	OpenEvent:FireClient(player)
 end)
