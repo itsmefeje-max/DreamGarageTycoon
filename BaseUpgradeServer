@@ -1,0 +1,27 @@
+-- [[ SERVER SCRIPT: BaseUpgradeServer ]]
+-- Purpose: Connects your ProximityPrompt to the networking system.
+-- Location: Inside the NPC Model (Same place as the ProximityPrompt)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- 1. SETUP REMOTE
+-- We use your existing "ShopRemotes" folder.
+local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
+local RemoteName = "OpenBaseUpgrade"
+
+-- Check if remote exists, creating it if you haven't yet
+local OpenEvent = Remotes:FindFirstChild(RemoteName)
+if not OpenEvent then
+	OpenEvent = Instance.new("RemoteEvent")
+	OpenEvent.Name = RemoteName
+	OpenEvent.Parent = Remotes
+end
+
+-- 2. CONNECT PROMPT
+-- Since the script is inside the NPC, we look for the prompt in the same parent
+local npc = script.Parent
+local prompt = npc:WaitForChild("ProximityPrompt")
+
+prompt.Triggered:Connect(function(player)
+	OpenEvent:FireClient(player)
+end)
