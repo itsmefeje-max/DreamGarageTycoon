@@ -1,6 +1,13 @@
 -- [[ LOCAL SCRIPT: SettingsClient (CENTERED POP) ]]
 -- Purpose: Settings UI + Music Toggle + Center Pop Animation
--- Fix: Forces AnchorPoint to (0.5, 0.5) so it scales from the middle, not the corner.
+-- Runs on: Client (StarterPlayerScripts or StarterGui)
+-- Location: StarterGui/SettingsGui
+-- Dependencies: SoundService, TweenService, Debris
+-- Public API: None (Internal Logic)
+-- Networking: None (Client-side UI logic only)
+-- Security: N/A (Visuals only)
+-- Performance: Tweens used for animations; Sound debris cleanup included.
+-- Notes: Hover sounds removed per request. Visual hovers retained.
 
 local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
@@ -31,18 +38,17 @@ local CONFIG = {
 		Normal = Color3.fromRGB(255, 255, 255)
 	},
 	Sounds = {
-		Open  = "rbxassetid://4676738150",
+		Open  = "rbxassetid://9083627113",
 		Click = "rbxassetid://9083627113",
-		Hover = "rbxassetid://6895079853"
 	},
 	DefaultVolume = 0.5,
 
 	-- Animation Settings
 	Anim = {
-		OpenTime = 0.3,
-		CloseTime = 0.2,
-		StartScale = 0.8,
-		EasingStyle = Enum.EasingStyle.Back,
+		OpenTime = 1.0,   -- [UPDATED] 1 Second
+		CloseTime = 1.0,  -- [UPDATED] 1 Second
+		StartScale = 0.0, -- [UPDATED] Starts at 0 size to prevent "snapping" when closing
+		EasingStyle = Enum.EasingStyle.Exponential, -- [UPDATED] Smoother for long animations
 	},
 }
 
@@ -50,6 +56,7 @@ local CONFIG = {
 local function playUiSound(name)
 	local id = CONFIG.Sounds[name]
 	if not id then return end
+
 	local s = Instance.new("Sound")
 	s.SoundId = id
 	s.Volume = 0.5
@@ -65,8 +72,7 @@ if not uiScale then
 	uiScale.Parent = window
 end
 
--- ✅ FORCE CENTER ANCHORING (THE FIX)
--- This ensures the scale animation starts from the center, not top-left.
+-- ✅ FORCE CENTER ANCHORING
 window.AnchorPoint = Vector2.new(0.5, 0.5)
 window.Position = UDim2.new(0.5, 0, 0.5, 0)
 
@@ -101,12 +107,13 @@ local function setWindowVisible(isOpen)
 		-- 1. Setup
 		window.Visible = true
 		openButton.Visible = false
-		uiScale.Scale = A.StartScale -- Start small
+		uiScale.Scale = A.StartScale -- Sets scale to 0 initially
 
 		playUiSound("Open")
 		setOtherGuisEnabled(false)
 
 		-- 2. Animate Scale to 1 (From Center)
+		-- Uses 'Out' so it slows down as it reaches full size
 		local info = TweenInfo.new(A.OpenTime, A.EasingStyle, Enum.EasingDirection.Out)
 		currentTween = TweenService:Create(uiScale, info, { Scale = 1 })
 		currentTween:Play()
@@ -115,8 +122,12 @@ local function setWindowVisible(isOpen)
 		-- 1. Animate Scale down (To Center)
 		playUiSound("Click")
 
-		local info = TweenInfo.new(A.CloseTime, A.EasingStyle, Enum.EasingDirection.In)
-		currentTween = TweenService:Create(uiScale, info, { Scale = A.StartScale })
+		-- Uses 'Out' direction here effectively too (Reversed In is tricky with Expon), 
+		-- but 'Out' + 'Scale=0' usually looks cleanest for closing.
+		-- Let's stick to standard logic: 'In' typically accelerates out.
+		-- For 1 second, 'Quint' or 'Exponential' In/Out works best.
+		local info = TweenInfo.new(A.CloseTime, A.EasingStyle, Enum.EasingDirection.In) 
+		currentTween = TweenService:Create(uiScale, info, { Scale = A.StartScale }) -- Goes to 0
 		currentTween:Play()
 
 		-- 2. Cleanup
@@ -151,9 +162,9 @@ local function setupButton(btn, onClick)
 
 	if not UserInputService.TouchEnabled then
 		btn.MouseEnter:Connect(function()
-			playUiSound("Hover")
 			TweenService:Create(btn, TweenInfo.new(0.12), { ImageColor3 = CONFIG.Colors.Hover }):Play()
 		end)
+
 		btn.MouseLeave:Connect(function()
 			TweenService:Create(btn, TweenInfo.new(0.12), { ImageColor3 = CONFIG.Colors.Normal }):Play()
 		end)
