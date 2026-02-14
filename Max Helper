@@ -21,7 +21,7 @@ local CLICK_SOUND_ID = "rbxassetid://9083627113"
 button.MouseButton1Click:Connect(function()
 	print("🖱️ MAX Button Clicked")
 
-	-- 1. Get Current Balance
+	-- 1. Get Current Bank Balance (Cash source)
 	local currentBank = 0
 	if player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Cash") then
 		currentBank = player.leaderstats.Cash.Value
