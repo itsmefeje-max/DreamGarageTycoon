@@ -1,297 +1,94 @@
--- [[ LOCAL SCRIPT: WithdrawLogic (Synced + Max + Suffix Support) ]]
--- VERSION: Pulse Animation + RemoteFunction Sync + Smart Input (K/M/B)
--- LOCATION: Inside the "Withdraw" Button (Child of the Frame)
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
+-- ( LOCAL SCRIPT: BankNavigation - SUFFIX UPDATE )
 local Players = game:GetService("Players")
-
+local SoundService = game:GetService("SoundService") 
+local TweenService = game:GetService("TweenService") 
 local player = Players.LocalPlayer
-local withdrawBtn = script.Parent
-local mainWindow = withdrawBtn.Parent -- The Frame holding the buttons
+local gui = script.Parent 
 
--- 🔄 REMOTE FUNCTION
-local withdrawFunc = ReplicatedStorage:WaitForChild("WithdrawFunction")
-
--- 📂 UI REFERENCES
-local amountInput = mainWindow:WaitForChild("AmountInput", 5)
-local VerifyLabel = mainWindow:WaitForChild("VerifyLabel", 5) 
-local SuccessLabel = mainWindow:WaitForChild("SuccessLabel", 5)
-local ErrorLabel = mainWindow:WaitForChild("ErrorLabel", 5)
-local balanceLabelV2 = mainWindow:FindFirstChild("BalanceLabelv2", true)
-
--- 🆕 MAX BUTTON REFERENCE
-local maxBtn = mainWindow:FindFirstChild("MaxButton") 
-
--- 🔊 SOUND CONFIG
-local CASH_SOUND_ID = "rbxassetid://140072726814802"
-local ERROR_SOUND_ID = "rbxassetid://3779045779"
+-- 🔊 CONFIG
 local CLICK_SOUND_ID = "rbxassetid://9083627113" 
+local DIM_COLOR = Color3.new(0.7, 0.7, 0.7) 
 
--- ⚙️ STATE VARIABLES
-local currentVerifyTween = nil 
-local currentVerifyStrokeTweens = {}
-local isCoolingDown = false 
+-- 1. FIND FRAMES & BUTTONS
+local bankFrame = gui:FindFirstChild("BankFrame")
+local transferFrame = gui:FindFirstChild("TransferFrame")
+local openTransferBtn, backBtn, withdrawBtn
 
--- 🎨 HOVER DIM CONFIG (matches Bank UI behavior)
-local HOVER_TWEEN = TweenInfo.new(0.2)
-local NORMAL_COLOR = Color3.fromRGB(255, 255, 255)
-local DIM_COLOR = Color3.fromRGB(200, 200, 200)
+if bankFrame then openTransferBtn = bankFrame:FindFirstChild("OpenTransferButton") end
+if transferFrame then 
+	backBtn = transferFrame:FindFirstChild("BackButton") 
+	withdrawBtn = transferFrame:FindFirstChild("WithdrawButton") 
+end
+local balanceLabelV2 = if transferFrame then transferFrame:FindFirstChild("BalanceLabelv2") else nil
 
 -- ============================================================================
--- 🛠️ HELPER FUNCTIONS (Formatting & Audio)
+-- 📊 ABBREVIATION HELPER
 -- ============================================================================
+local SUFFIXES = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
 
-local function playSound(soundId)
-	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = 1
-	sound.Parent = SoundService 
-	sound:Play()
-	game.Debris:AddItem(sound, 3)
+local function formatNumber(n)
+	n = tonumber(n)
+	if not n then return "0" end
+	if n < 1000 then return tostring(math.floor(n)) end
+	local i = math.floor(math.log(n, 1000))
+	local v = math.pow(1000, i)
+	local suffix = SUFFIXES[i] or "?"
+	return string.format("%.2f%s", n / v, suffix)
 end
 
-local function addHover(btn)
-	if not btn then return end
-
-	local prop
-	if btn:IsA("ImageButton") or btn:IsA("ImageLabel") then
-		prop = "ImageColor3"
-	elseif btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("Frame") then
-		prop = "BackgroundColor3"
-	end
-
-	if not prop then return end
-
-	btn.MouseEnter:Connect(function()
-		TweenService:Create(btn, HOVER_TWEEN, {[prop] = DIM_COLOR}):Play()
-	end)
-
-	btn.MouseLeave:Connect(function()
-		TweenService:Create(btn, HOVER_TWEEN, {[prop] = NORMAL_COLOR}):Play()
-	end)
-end
-
--- ✅ NEW: Parses "10k", "5.5m", "1,000" into numbers
-local function parseAmount(text)
-	if not text then return 0 end
-	text = text:lower():gsub(",", "") -- Remove commas
-
-	local multiplier = 1
-	if text:match("k") then multiplier = 1000 end
-	if text:match("m") then multiplier = 1000000 end
-	if text:match("b") then multiplier = 1000000000 end
-
-	local cleanNum = tonumber(text:match("[%d%.]+")) -- Extract number
-	if cleanNum then 
-		return math.floor(cleanNum * multiplier) 
-	end
-	return 0
-end
-
-
-local function updateTransferBalance()
+local function updateBalance()
 	if not balanceLabelV2 then return end
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
-	balanceLabelV2.Text = "$ " .. tostring(cashValue and cashValue.Value or 0)
-end
-
-local function animateResult(uiObject)
-	if not uiObject then return end
-	local strokes = uiObject:GetDescendants()
-
-	-- 1. Show
-	uiObject.Visible = true
-	uiObject.ZIndex = 20 
-	if uiObject:IsA("ImageLabel") then uiObject.ImageTransparency = 0 end
-	if uiObject:IsA("TextLabel") then uiObject.TextTransparency = 0 end
-	for _, child in ipairs(strokes) do
-		if child:IsA("UIStroke") then
-			child.Transparency = 0
-		end
-	end
-
-	-- 2. Wait
-	task.wait(2)
-
-	-- 3. Fade Out
-	local goals = {}
-	if uiObject:IsA("ImageLabel") then goals.ImageTransparency = 1 end
-	if uiObject:IsA("TextLabel") then goals.TextTransparency = 1 end
-	for _, child in ipairs(strokes) do
-		if child:IsA("UIStroke") then
-			TweenService:Create(child, TweenInfo.new(0.5), {Transparency = 1}):Play()
-		end
-	end
-
-	local tweenOut = TweenService:Create(uiObject, TweenInfo.new(0.5), goals)
-	tweenOut:Play()
-	tweenOut.Completed:Wait()
-
-	uiObject.Visible = false
-end
-
-local function startVerifying()
-	if not VerifyLabel then return end
-	VerifyLabel.Visible = true
-	VerifyLabel.ZIndex = 20
-	for _, tween in ipairs(currentVerifyStrokeTweens) do
-		tween:Cancel()
-	end
-	currentVerifyStrokeTweens = {}
-
-	local pulseInfo = TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
-	local goals = {}
-
-	if VerifyLabel:IsA("ImageLabel") then 
-		VerifyLabel.ImageTransparency = 1 
-		goals.ImageTransparency = 0 
-	end
-	if VerifyLabel:IsA("TextLabel") then 
-		VerifyLabel.TextTransparency = 1 
-		goals.TextTransparency = 0 
-	end
-	for _, child in ipairs(VerifyLabel:GetDescendants()) do
-		if child:IsA("UIStroke") then
-			child.Transparency = 1
-			table.insert(currentVerifyStrokeTweens, TweenService:Create(child, pulseInfo, {Transparency = 0}))
-		end
-	end
-
-	currentVerifyTween = TweenService:Create(VerifyLabel, pulseInfo, goals)
-	currentVerifyTween:Play()
-	for _, tween in ipairs(currentVerifyStrokeTweens) do tween:Play() end
-end
-
-local function stopVerifying()
-	if currentVerifyTween then
-		currentVerifyTween:Cancel()
-		currentVerifyTween = nil
-	end
-	for _, tween in ipairs(currentVerifyStrokeTweens) do
-		tween:Cancel()
-	end
-	currentVerifyStrokeTweens = {}
-	if VerifyLabel then
-		for _, child in ipairs(VerifyLabel:GetDescendants()) do
-			if child:IsA("UIStroke") then
-				child.Transparency = 1
-			end
-		end
-		if VerifyLabel:IsA("ImageLabel") then VerifyLabel.ImageTransparency = 1 end
-		if VerifyLabel:IsA("TextLabel") then VerifyLabel.TextTransparency = 1 end
-		VerifyLabel.Visible = false
+	if cashValue then
+		balanceLabelV2.Text = "$" .. formatNumber(cashValue.Value) -- ✅ Using Suffixes now
 	end
 end
 
 -- ============================================================================
--- 🆕 MAX BUTTON LOGIC
+-- 🛠️ LOGIC
 -- ============================================================================
-updateTransferBalance()
 
-addHover(withdrawBtn)
-
-if maxBtn then
-	addHover(maxBtn)
+local function playClickSound()
+	local sound = Instance.new("Sound")
+	sound.SoundId = CLICK_SOUND_ID
+	sound.Volume = 0.5
+	sound.Parent = SoundService
+	sound:Play()
+	game.Debris:AddItem(sound, 1)
 end
 
-if maxBtn then
-	maxBtn.MouseButton1Click:Connect(function()
-		local currentBank = 0
-		if player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Cash") then
-			currentBank = player.leaderstats.Cash.Value
-		end
-
-		playSound(CLICK_SOUND_ID)
-
-		if currentBank > 0 then
-			amountInput.Text = tostring(math.floor(currentBank))
-			print("✅ Max Amount Set: " .. amountInput.Text)
-		else
-			amountInput.Text = "0"
-		end
-	end)
+local function setupHover(button)
+	if not button then return end
+	local originalColor = button.ImageColor3
+	button.MouseEnter:Connect(function() TweenService:Create(button, TweenInfo.new(0.2), {ImageColor3 = DIM_COLOR}):Play() end)
+	button.MouseLeave:Connect(function() TweenService:Create(button, TweenInfo.new(0.2), {ImageColor3 = originalColor}):Play() end)
 end
 
--- ============================================================================
--- 🟢 MAIN TRANSFER BUTTON LOGIC
--- ============================================================================
-withdrawBtn.MouseButton1Click:Connect(function()
-
-	-- 🛑 1. CHECK COOLDOWN
-	if isCoolingDown then return end
-	isCoolingDown = true 
-
-	-- 2. DISABLE BUTTON VISUALLY
-	withdrawBtn.Active = false
-	withdrawBtn.AutoButtonColor = false
-
-	-- 3. START VFX
-	startVerifying()
-	task.wait(1.5) -- "Thinking" Time
-
-	-- 4. PREPARE DATA
-	local amount = parseAmount(amountInput.Text) -- ✅ Uses new parser
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
-	local currentBank = cashValue and cashValue.Value or 0
-
-	-- 5. VALIDATION
-	if (amount <= 0) or (amount > currentBank) then
-		stopVerifying()
-		print("❌ Invalid Input or Insufficient Funds")
-		playSound(ERROR_SOUND_ID)
-		task.spawn(function() animateResult(ErrorLabel) end)
-
-		-- Reset Button
-		task.wait(1)
-		isCoolingDown = false
-		withdrawBtn.Active = true
-		withdrawBtn.AutoButtonColor = true
-		return
-	end
-
-	-- 6. SERVER REQUEST (Transfer Bank -> Wallet)
-	local success, msg = withdrawFunc:InvokeServer(amount, "Transfer")
-
-	-- 7. FINISH
-	stopVerifying()
-
-	if success then
-		print("✅ Transaction Approved")
-		playSound(CASH_SOUND_ID)
-		amountInput.Text = "" 
-		task.spawn(function() animateResult(SuccessLabel) end)
-	else
-		print("❌ Transaction Denied: " .. msg)
-		playSound(ERROR_SOUND_ID)
-		task.spawn(function() animateResult(ErrorLabel) end)
-	end
-
-	-- 8. RESET
-	task.wait(1)
-	isCoolingDown = false
-	withdrawBtn.Active = true
-	withdrawBtn.AutoButtonColor = true
-end)
-
--- Initialize Visuals
-if VerifyLabel then VerifyLabel.Visible = false end
-if SuccessLabel then SuccessLabel.Visible = false end
-if ErrorLabel then ErrorLabel.Visible = false end
-
-local leaderstats = player:FindFirstChild("leaderstats")
-local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
-if cashValue then
-	cashValue.Changed:Connect(updateTransferBalance)
+local function openTransfer()
+	playClickSound()
+	if bankFrame then bankFrame.Visible = false end
+	if transferFrame then transferFrame.Visible = true end
+	updateBalance() 
 end
 
-if VerifyLabel then
-	for _, child in ipairs(VerifyLabel:GetDescendants()) do
-		if child:IsA("UIStroke") then
-			child.Transparency = 1
-		end
-	end
+local function closeTransfer()
+	playClickSound()
+	if transferFrame then transferFrame.Visible = false end
+	if bankFrame then bankFrame.Visible = true end
 end
+
+-- CONNECT
+setupHover(openTransferBtn)
+setupHover(backBtn)
+setupHover(withdrawBtn)
+
+if openTransferBtn then openTransferBtn.MouseButton1Click:Connect(openTransfer) end
+if backBtn then backBtn.MouseButton1Click:Connect(closeTransfer) end
+if withdrawBtn then withdrawBtn.MouseButton1Click:Connect(function() playClickSound() end) end
+
+if player:WaitForChild("leaderstats", 5) then
+	player.leaderstats.Cash.Changed:Connect(updateBalance)
+end
+
+if transferFrame then transferFrame.Visible = false end
