@@ -37,12 +37,12 @@ local function WithdrawFromATM(player, amount)
 	-- 🛑 DISTANCE CHECK (Security)
 	local npcFolder = Workspace:FindFirstChild(NPC_FOLDER_NAME)
 	local managerNPC = npcFolder and npcFolder:FindFirstChild(MANAGER_NAME)
-	
+
 	-- 🛡️ SECURITY FIX: Fail Safe Logic
 	if managerNPC then
 		local npcRoot = managerNPC:FindFirstChild("HumanoidRootPart") or managerNPC.PrimaryPart
 		local pRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-		
+
 		if npcRoot and pRoot then
 			if (pRoot.Position - npcRoot.Position).Magnitude > MAX_DISTANCE then
 				return false, "You are too far from the ATM!"
