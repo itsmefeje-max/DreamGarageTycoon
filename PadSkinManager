@@ -1,0 +1,104 @@
+-- [[ SERVER SCRIPT: PadSkinManager ]]
+-- Purpose: Visual Handler for Base Skins. 
+-- DESIGN: Biggest Part = Shiny Metal. Small Parts = Glowing Neon.
+-- Location: ServerScriptService
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
+local BaseSkinStats = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
+
+-- 🛑 EXCLUSION CHECK
+local function IsIgnored(part)
+	if part.Name == "BuyButton" then return true end
+	if part.Parent and part.Parent.Name == "BuyButton" then return true end
+	if part.Name == "Price" or part.Name == "PriceLabel" then return true end
+	if part.Transparency >= 1 then return true end -- Don't paint invisible triggers
+	return false
+end
+
+-- 🎨 THE SMART PAINT ENGINE
+local function PaintPlot(plot, skinName)
+	if not plot then return end
+
+	local skinData = BaseSkinStats[skinName]
+	if not skinData then return end
+
+	local padsFolder = plot:FindFirstChild("Pads")
+	if not padsFolder then return end
+
+	print("🎨 Painting " .. plot.Name .. " with " .. skinName .. " (Smart Design)")
+
+	for _, padModel in pairs(padsFolder:GetChildren()) do
+
+		-- 1. GATHER ALL VALID PARTS
+		local partsToPaint = {}
+
+		-- Check if the model itself is a part
+		if padModel:IsA("BasePart") and not IsIgnored(padModel) then
+			table.insert(partsToPaint, padModel)
+		end
+
+		-- Check children
+		for _, part in pairs(padModel:GetDescendants()) do
+			if part:IsA("BasePart") and not IsIgnored(part) then
+				table.insert(partsToPaint, part)
+			end
+		end
+
+		-- 2. SORT BY SIZE (Volume)
+		-- We want the Main Base (Biggest Part) to be Metal, and Details to be Neon
+		table.sort(partsToPaint, function(a, b)
+			local volA = a.Size.X * a.Size.Y * a.Size.Z
+			local volB = b.Size.X * b.Size.Y * b.Size.Z
+			return volA > volB -- Biggest first
+		end)
+
+		-- 3. APPLY STYLES
+		for i, part in ipairs(partsToPaint) do
+			part.Color = skinData.Color
+
+			if i == 1 then
+				-- 🏛️ BIGGEST PART (The Base) -> Shiny Metal
+				part.Material = Enum.Material.Metal
+				part.Reflectance = 0.4 -- ✨ High Shine
+			else
+				-- ⚡ SMALLER PARTS (The Children/Details) -> Neon
+				part.Material = Enum.Material.Neon
+				part.Reflectance = 0
+			end
+		end
+	end
+end
+
+-- 🔄 PLAYER MONITOR
+local function SetupPlayer(player)
+	task.spawn(function()
+		-- A. Wait for Plot
+		local plotName = player:GetAttribute("OccupiedPlot")
+		while not plotName do
+			player:GetAttributeChangedSignal("OccupiedPlot"):Wait()
+			plotName = player:GetAttribute("OccupiedPlot")
+		end
+
+		local plot = TycoonFolder:WaitForChild(plotName, 10)
+		if not plot then return end
+
+		-- B. Initial Paint
+		local currentSkin = player:GetAttribute("EquippedSkin")
+		if currentSkin and currentSkin ~= "Default" then
+			PaintPlot(plot, currentSkin)
+		end
+
+		-- C. Live Paint
+		player:GetAttributeChangedSignal("EquippedSkin"):Connect(function()
+			local newSkin = player:GetAttribute("EquippedSkin")
+			PaintPlot(plot, newSkin)
+		end)
+	end)
+end
+
+Players.PlayerAdded:Connect(SetupPlayer)
+for _, p in pairs(Players:GetPlayers()) do SetupPlayer(p) end
