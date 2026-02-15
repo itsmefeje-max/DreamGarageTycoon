@@ -1,20 +1,21 @@
 -- [[ SERVER SCRIPT: ReceiptRouter ]]
 -- Centralizes MarketplaceService.ProcessReceipt for the entire game.
--- UPDATED: Fixes Infinite Yield by looking in ServerStorage for Reroll Function.
+-- UPDATED: Adds Base Skin Support (Gold Upgrade) + Fixes Infinite Yield.
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ServerStorage = game:GetService("ServerStorage")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
--- ⚙️ PRODUCT IDs
-local TABLET_2X_ID = 3509697462 -- Your Tablet ID
-local SHOP_REROLL_ID = 3520990584 -- ✅ Your Reroll ID
+-- ⚙️ EXISTING PRODUCT IDs
+local TABLET_2X_ID = 3509697462 -- Tablet ID
+local SHOP_REROLL_ID = 3520990584 -- Reroll ID
 
--- 🚗 CAR PRODUCT IDs (Add these when you create them!)
--- Format: [Product_ID] = "CarName"
+-- 🚗 CAR PRODUCT IDs
 local CAR_PRODUCT_IDS = {
-	[3524326648] = "Delta", -- The 5 Robux ID
+	[3524326648] = "Delta",
 	[3524327150] = "Iva",
 	[3524327478] = "Atom",
 	[3524327780] = "Windsor",
@@ -24,11 +25,17 @@ local CAR_PRODUCT_IDS = {
 
 -- 🔗 REFERENCES
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
-
--- ✅ FIX: Look for the function in ServerStorage (Shared Location)
--- This prevents the "Infinite Yield" error from the previous script.
 local ShopRerollFunc = ServerStorage:WaitForChild("ShopRerollFunction")
 
+-- ✅ NEW: Base Skin Module Reference
+local BaseSkinStats
+pcall(function()
+	BaseSkinStats = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
+end)
+
+-- ============================================================================
+-- 🧾 MAIN RECEIPT PROCESSOR
+-- ============================================================================
 MarketplaceService.ProcessReceipt = function(receiptInfo)
 	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
 
@@ -37,14 +44,16 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 
 	local pid = receiptInfo.ProductId
 
+	print("🛒 Processing Purchase for ProductID: " .. pid)
+
 	-- ====================================================
-	-- PRODUCT: TABLET 2X EARNINGS
+	-- 1️⃣ PRODUCT: TABLET 2X EARNINGS
 	-- ====================================================
 	if pid == TABLET_2X_ID then
 		local myPlotName = player:GetAttribute("OccupiedPlot")
-		local plot = TycoonFolder:FindFirstChild(myPlotName or "")
+		local plot = myPlotName and TycoonFolder:FindFirstChild(myPlotName)
 
-		-- If plot isn't loaded yet, retry later
+		-- Retry if plot isn't ready
 		if not plot or not plot:FindFirstChild("PendingEarnings") then 
 			return Enum.ProductPurchaseDecision.NotProcessedYet 
 		end
@@ -59,18 +68,15 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			if ls and ls:FindFirstChild("Cash") then
 				ls.Cash.Value += (amount * 2)
 			end
-			return Enum.ProductPurchaseDecision.PurchaseGranted
-		else
-			-- Edge case: 0 earnings, grant anyway to avoid infinite retry loop
-			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
+		return Enum.ProductPurchaseDecision.PurchaseGranted
 
 		-- ====================================================
-		-- PRODUCT: SHOP REROLL (Restock)
+		-- 2️⃣ PRODUCT: SHOP REROLL (Restock)
 		-- ====================================================
 	elseif pid == SHOP_REROLL_ID then
 		if ShopRerollFunc then
-			ShopRerollFunc:Invoke(player) -- Call LocalShopService via ServerStorage
+			ShopRerollFunc:Invoke(player) 
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		else
 			warn("⚠️ Critical: ShopRerollFunction missing in ServerStorage!")
@@ -78,34 +84,69 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		end
 
 		-- ====================================================
-		-- PRODUCT: BUY CAR WITH ROBUX
+		-- 3️⃣ PRODUCT: BASE SKINS (Gold Upgrade) ✅ NEW
 		-- ====================================================
-	elseif CAR_PRODUCT_IDS[pid] then
+	elseif BaseSkinStats then
+		-- Search the module to see if this ID matches a skin
+		local skinFound = nil
+		for name, data in pairs(BaseSkinStats) do
+			if data.ProductId == pid then
+				skinFound = name
+				break
+			end
+		end
+
+		if skinFound then
+			print("💎 Base Skin Purchased: " .. skinFound)
+
+			-- Grant Ownership
+			local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
+			local ownedTable = {}
+			pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
+
+			if not table.find(ownedTable, skinFound) then
+				table.insert(ownedTable, skinFound)
+				player:SetAttribute("OwnedBaseSkins", HttpService:JSONEncode(ownedTable))
+			end
+
+			-- Auto Equip
+			player:SetAttribute("EquippedSkin", skinFound)
+
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+	end
+
+	-- ====================================================
+	-- 4️⃣ PRODUCT: BUY CAR WITH ROBUX
+	-- ====================================================
+	-- We check this LAST because it's a generic table lookup
+	if CAR_PRODUCT_IDS[pid] then
 		local carName = CAR_PRODUCT_IDS[pid]
 		local CarTools = ServerStorage:FindFirstChild("CarTools")
 
-		-- Try finding the tool by exact name or with " Item" suffix
+		-- Try finding the tool
 		local tool = CarTools and (CarTools:FindFirstChild(carName) or CarTools:FindFirstChild(carName.." Item"))
 
 		if tool then
-			-- Grant the car directly to Backpack and StarterGear
+			-- Grant the car
 			local newTool = tool:Clone()
 			newTool:SetAttribute("IssuedByServer", true)
 			newTool:SetAttribute("IssuedAt", os.time())
-			newTool:SetAttribute("ToolId", tool.Name)
-			newTool.Parent = player.Backpack
+			newTool:SetAttribute("ToolId", tool.Name) -- Critical for Anti-Cheat
 
+			newTool.Parent = player.Backpack
 			local gearClone = newTool:Clone()
 			gearClone.Parent = player.StarterGear
 
-			print("✅ Gave Robux Car: " .. carName .. " to " .. player.Name)
+			print("✅ Gave Robux Car: " .. carName)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		else
-			warn("❌ Critical: Player bought " .. carName .. " but the Tool is missing in ServerStorage!")
-			return Enum.ProductPurchaseDecision.NotProcessedYet -- Retry until you fix the tool name
+			warn("❌ Critical: Tool missing for Robux Car: " .. carName)
+			return Enum.ProductPurchaseDecision.NotProcessedYet 
 		end
 	end
 
 	-- Unknown Product
+	warn("⚠️ Unknown ProductID Purchased: " .. pid)
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
