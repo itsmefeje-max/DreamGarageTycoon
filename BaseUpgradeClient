@@ -1,5 +1,5 @@
--- [[ LOCAL SCRIPT: BaseUpgradeClient (FIXED SOUNDS) ]]
--- Purpose: Shop UI, Feedback Indicator, and RELIABLE Success/Fail Sounds.
+-- [[ LOCAL SCRIPT: BaseUpgradeClient (EQUIP SYSTEM + SOUNDS) ]]
+-- Purpose: Shop UI, Feedback, Sounds, and EQUIP/UNEQUIP Logic.
 -- Location: StarterPlayerScripts
 
 local Players = game:GetService("Players")
@@ -9,7 +9,7 @@ local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local SoundService = game:GetService("SoundService") 
-local ContentProvider = game:GetService("ContentProvider") -- ✅ ADDED FOR LOADING
+local ContentProvider = game:GetService("ContentProvider") 
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
@@ -34,11 +34,12 @@ local CLOSE_BTN_NAME = "CloseButton"
 local FEEDBACK_LBL_NAME = "Indicator-purchase"
 local BLUR_SIZE = 24 
 
--- 🎵 SOUND PRE-LOADING (The Fix)
+-- 🎵 SOUND PRE-LOADING
 local Sounds = {}
 local SFX_IDs = {
-	Success = "rbxassetid://2619623062", -- Cha-Ching
-	Fail = "rbxassetid://1526487928"    -- Error Buzz
+	Success = "rbxassetid://2619623062", 
+	Fail = "rbxassetid://1526487928",
+	Equip = "rbxassetid://6895079853" -- Added subtle pop for equip
 }
 
 -- Create sounds once at startup
@@ -46,7 +47,7 @@ for name, id in pairs(SFX_IDs) do
 	local s = Instance.new("Sound")
 	s.Name = name
 	s.SoundId = id
-	s.Volume = 2 -- Boost volume
+	s.Volume = 2
 	s.Parent = SoundService
 	Sounds[name] = s
 end
@@ -58,13 +59,11 @@ local currentBlur = nil
 local feedbackDebounce = false 
 
 -- ============================================================================
--- 🔊 ROBUST SOUND ENGINE
+-- 🔊 SOUND ENGINE
 -- ============================================================================
 local function PlaySound(name)
 	local s = Sounds[name]
-	if s then
-		s:Play()
-	end
+	if s then s:Play() end
 end
 
 -- ============================================================================
@@ -77,15 +76,15 @@ local function ShowFeedback(message, isSuccess)
 	if not frame then return end
 
 	local feedbackLbl = frame:FindFirstChild(FEEDBACK_LBL_NAME)
-	if not feedbackLbl then return warn("⚠️ Indicator-purchase missing!") end
+	if not feedbackLbl then return end 
 
 	-- 1. PLAY SOUND & SET COLOR
 	if isSuccess then
-		feedbackLbl.TextColor3 = Color3.fromRGB(85, 255, 127) -- Green
-		PlaySound("Success") -- ✅ PLAYS PRE-LOADED SOUND
+		feedbackLbl.TextColor3 = Color3.fromRGB(85, 255, 127) 
+		PlaySound("Success") 
 	else
-		feedbackLbl.TextColor3 = Color3.fromRGB(255, 85, 85) -- Red
-		PlaySound("Fail")    -- ❌ PLAYS PRE-LOADED SOUND
+		feedbackLbl.TextColor3 = Color3.fromRGB(255, 85, 85) 
+		PlaySound("Fail")    
 	end
 
 	-- 2. SHOW TEXT
@@ -134,7 +133,7 @@ MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, produc
 end)
 
 -- ============================================================================
--- 🛠️ HELPER FUNCTIONS (Preserved)
+-- 🛠️ HELPER FUNCTIONS
 -- ============================================================================
 local function setBlur(enable)
 	if enable then
@@ -214,7 +213,7 @@ local function setMovement(active)
 end
 
 -- ============================================================================
--- 🛍️ BUTTON LOGIC
+-- 🛍️ CARD LOGIC (BUY / EQUIP / UNEQUIP)
 -- ============================================================================
 
 local function UpdateCardVisuals(cardFrame, skinName)
@@ -225,19 +224,39 @@ local function UpdateCardVisuals(cardFrame, skinName)
 	local btnRobux = buyFrame:FindFirstChild("BuyForRobux")
 	local obtainedIndicator = buyFrame:FindFirstChild("ObtainedIndicator")
 
+	-- ✅ NEW BUTTONS
+	local btnEquip = buyFrame:FindFirstChild("Equip")
+	local btnUnequip = buyFrame:FindFirstChild("Unequip")
+
 	local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
 	local ownedTable = {}
 	pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
 
 	local isOwned = table.find(ownedTable, skinName)
+	local currentEquip = player:GetAttribute("EquippedSkin")
 
 	if isOwned then
+		-- 1. HIDE BUY BUTTONS & INDICATOR
 		if btnCash then btnCash.Visible = false end
 		if btnRobux then btnRobux.Visible = false end
-		if obtainedIndicator then obtainedIndicator.Visible = true end
+		if obtainedIndicator then obtainedIndicator.Visible = false end -- Hide "Obtained" text, show buttons instead
+
+		-- 2. HANDLE EQUIP / UNEQUIP STATE
+		if currentEquip == skinName then
+			-- Currently equipped -> Show UNEQUIP
+			if btnEquip then btnEquip.Visible = false end
+			if btnUnequip then btnUnequip.Visible = true end
+		else
+			-- Owned but not equipped -> Show EQUIP
+			if btnEquip then btnEquip.Visible = true end
+			if btnUnequip then btnUnequip.Visible = false end
+		end
 	else
+		-- NOT OWNED
 		if btnCash then btnCash.Visible = true end
 		if btnRobux then btnRobux.Visible = true end
+		if btnEquip then btnEquip.Visible = false end
+		if btnUnequip then btnUnequip.Visible = false end
 		if obtainedIndicator then obtainedIndicator.Visible = false end
 	end
 end
@@ -245,38 +264,65 @@ end
 local function ConnectCard(cardFrame, skinName)
 	UpdateCardVisuals(cardFrame, skinName)
 
+	-- LISTENERS
 	player:GetAttributeChangedSignal("OwnedBaseSkins"):Connect(function()
+		UpdateCardVisuals(cardFrame, skinName)
+	end)
+	player:GetAttributeChangedSignal("EquippedSkin"):Connect(function()
 		UpdateCardVisuals(cardFrame, skinName)
 	end)
 
 	local buyFrame = cardFrame:FindFirstChild("BuyFrame")
 	if not buyFrame then return end
 
-	-- 💵 CASH BUTTON
+	-- 1. BUY CASH
 	local btnCash = buyFrame:FindFirstChild("BuyForCash")
-	if btnCash then
+	if btnCash and Kit and Kit.Tween then
+		Kit.Tween:SetupButton(btnCash, function()
+			if feedbackDebounce then return end 
+			local success, msg = TransactionFunc:InvokeServer(skinName, "Cash")
+			if success then ShowFeedback("Purchase Successful!", true)
+			else ShowFeedback(msg or "Purchase Failed", false) end
+		end)
+	end
+
+	-- 2. BUY ROBUX
+	local btnRobux = buyFrame:FindFirstChild("BuyForRobux")
+	if btnRobux and Kit and Kit.Tween then
+		Kit.Tween:SetupButton(btnRobux, function()
+			TransactionFunc:InvokeServer(skinName, "Robux") 
+		end)
+	end
+
+	-- 3. EQUIP BUTTON (NEW)
+	local btnEquip = buyFrame:FindFirstChild("Equip")
+	if btnEquip then
+		-- Attach click handler
+		local function onEquip()
+			TransactionFunc:InvokeServer(skinName, "Equip")
+			PlaySound("Equip")
+		end
+
 		if Kit and Kit.Tween then
-			Kit.Tween:SetupButton(btnCash, function()
-				if feedbackDebounce then return end 
-
-				local success, msg = TransactionFunc:InvokeServer(skinName, "Cash")
-
-				if success then
-					ShowFeedback("Purchase Successful!", true)
-				else
-					ShowFeedback(msg or "Purchase Failed", false)
-				end
-			end)
+			Kit.Tween:SetupButton(btnEquip, onEquip)
+		else
+			btnEquip.MouseButton1Click:Connect(onEquip)
 		end
 	end
 
-	-- 💎 ROBUX BUTTON
-	local btnRobux = buyFrame:FindFirstChild("BuyForRobux")
-	if btnRobux then
+	-- 4. UNEQUIP BUTTON (NEW)
+	local btnUnequip = buyFrame:FindFirstChild("Unequip")
+	if btnUnequip then
+		-- Attach click handler
+		local function onUnequip()
+			TransactionFunc:InvokeServer(skinName, "Unequip")
+			PlaySound("Equip")
+		end
+
 		if Kit and Kit.Tween then
-			Kit.Tween:SetupButton(btnRobux, function()
-				TransactionFunc:InvokeServer(skinName, "Robux") 
-			end)
+			Kit.Tween:SetupButton(btnUnequip, onUnequip)
+		else
+			btnUnequip.MouseButton1Click:Connect(onUnequip)
 		end
 	end
 end
@@ -286,11 +332,8 @@ local function SetupShop()
 	if not gui then return end
 	local scroller = gui:FindFirstChild(SCROLLER_NAME, true) 
 	if not scroller then return end 
-
 	local card1 = scroller:FindFirstChild("Card1")
-	if card1 then
-		ConnectCard(card1, "Gold") 
-	end
+	if card1 then ConnectCard(card1, "Gold") end
 end
 
 -- ============================================================================
