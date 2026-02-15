@@ -1,0 +1,21 @@
+local BaseSkinStats = {
+	["Gold"] = {
+		Name = "Midas Touch",
+		Description = "Goldify your Base + 25% Cash Boost",
+
+		-- 💰 PRICES
+		PriceCash = 7500000,   -- $7.5 Million
+		PriceRobux = 149,      -- 149 Robux (Developer Product Price)
+		ProductId = 0,         -- [IMPORTANT] PASTE YOUR DEV PRODUCT ID HERE
+
+		-- 🎨 VISUALS
+		Image = "rbxassetid://3537433998", -- The Gold Image
+		Color = Color3.fromRGB(255, 215, 0),
+		Material = Enum.Material.Metal,
+
+		-- 📈 EFFECT
+		Multiplier = 1.25 -- 1.25x Boost
+	}
+}
+
+return BaseSkinStats
