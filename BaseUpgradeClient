@@ -1,12 +1,12 @@
--- [[ LOCAL SCRIPT: BaseUpgradeClient ]]
--- Purpose: Opens UI, Freezes Player, Blurs Screen, Hides FriendBoost, AND Handles Purchases.
+-- [[ LOCAL SCRIPT: BaseUpgradeClient (FIXED VISUALS) ]]
+-- Purpose: Opens UI, Freezes Player, Blurs Screen, Hides FriendBoost, Handles Purchases & VISUALS.
 -- Location: StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
-local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
@@ -14,7 +14,7 @@ local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
 
 -- 📡 NETWORKING
 local OpenEvent = Remotes:WaitForChild("OpenBaseUpgrade")
-local TransactionFunc = Remotes:WaitForChild("BaseUpgradeTransaction") -- ✅ Added for Buying
+local TransactionFunc = Remotes:WaitForChild("BaseUpgradeTransaction")
 
 -- 📦 REQUIRE KIT (For Sound & Animations)
 local Kit
@@ -25,7 +25,7 @@ end)
 -- ⚙️ CONFIGURATION
 local UI_NAME = "BaseUpgradeUI"
 local FRAME_NAME = "MainFrame"
-local SCROLLER_NAME = "UpgradeScroller" -- ✅ Added for Shop
+local SCROLLER_NAME = "UpgradeScroller" 
 local CLOSE_BTN_NAME = "CloseButton"
 local BLUR_SIZE = 24 
 
@@ -35,9 +35,8 @@ local hiddenObjects = {}
 local currentBlur = nil 
 
 -- ============================================================================
--- 🛠️ HELPER FUNCTIONS (Preserved from your script)
+-- 🛠️ HELPER FUNCTIONS (Preserved)
 -- ============================================================================
-
 -- 1. BLUR EFFECT
 local function setBlur(enable)
 	if enable then
@@ -59,7 +58,7 @@ local function setBlur(enable)
 	end
 end
 
--- 2. HIDE SPECIFIC OBJECTS (Like FriendBoost)
+-- 2. HIDE SPECIFIC OBJECTS
 local function toggleNamedGuiObjects(shouldHide, objectName)
 	if shouldHide then
 		for _, obj in pairs(PlayerGui:GetDescendants()) do
@@ -78,7 +77,7 @@ local function toggleNamedGuiObjects(shouldHide, objectName)
 	end
 end
 
--- 3. HIDE OTHER SCREEN GUIS (Focus Mode)
+-- 3. HIDE OTHER SCREEN GUIS
 local function toggleOtherGuis(shouldHide)
 	local myGui = PlayerGui:FindFirstChild(UI_NAME)
 
@@ -111,11 +110,9 @@ local function setMovement(active)
 	local char = player.Character
 	if char and char:FindFirstChild("Humanoid") then
 		if not active then
-			-- FREEZE
 			char.Humanoid.WalkSpeed = 0
 			char.Humanoid.JumpPower = 0
 		else
-			-- UNFREEZE (Restore defaults)
 			char.Humanoid.WalkSpeed = 16
 			char.Humanoid.JumpPower = 50
 		end
@@ -123,24 +120,69 @@ local function setMovement(active)
 end
 
 -- ============================================================================
--- 🛍️ NEW SHOP LOGIC (Integrated)
+-- 🛍️ NEW SHOP LOGIC (FIXED VISUALS)
 -- ============================================================================
 
+-- ✅ NEW: Updates the card visually based on ownership
+local function UpdateCardVisuals(cardFrame, skinName)
+	local buyFrame = cardFrame:FindFirstChild("BuyFrame")
+	if not buyFrame then return end
+
+	-- LOCATE CHILDREN INSIDE BUYFRAME
+	local btnCash = buyFrame:FindFirstChild("BuyForCash")
+	local btnRobux = buyFrame:FindFirstChild("BuyForRobux")
+	local obtainedIndicator = buyFrame:FindFirstChild("ObtainedIndicator") -- ✅ Sibling of buttons
+
+	-- 1. CHECK OWNERSHIP (Read Attribute)
+	local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
+	local ownedTable = {}
+	pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
+
+	local isOwned = table.find(ownedTable, skinName)
+
+	if isOwned then
+		-- ✅ OWNED: Keep Frame Visible, Hide Buttons, Show Indicator
+		buyFrame.Visible = true 
+
+		if btnCash then btnCash.Visible = false end
+		if btnRobux then btnRobux.Visible = false end
+
+		if obtainedIndicator then 
+			obtainedIndicator.Visible = true 
+		else
+			warn("⚠️ ObtainedIndicator not found inside BuyFrame!")
+		end
+	else
+		-- 🛒 UNOWNED: Keep Frame Visible, Show Buttons, Hide Indicator
+		buyFrame.Visible = true
+
+		if btnCash then btnCash.Visible = true end
+		if btnRobux then btnRobux.Visible = true end
+
+		if obtainedIndicator then obtainedIndicator.Visible = false end
+	end
+end
+
 local function ConnectCard(cardFrame, skinName)
+	-- 1. Initial Visual Check
+	UpdateCardVisuals(cardFrame, skinName)
+
+	-- 2. Live Listener (Updates instantly when Attribute changes)
+	player:GetAttributeChangedSignal("OwnedBaseSkins"):Connect(function()
+		UpdateCardVisuals(cardFrame, skinName)
+	end)
+
 	local buyFrame = cardFrame:FindFirstChild("BuyFrame")
 	if not buyFrame then return end
 
 	-- 💵 CASH BUTTON
 	local btnCash = buyFrame:FindFirstChild("BuyForCash")
 	if btnCash then
-		-- Apply your "Dim" effect
 		if Kit and Kit.Tween then
 			Kit.Tween:SetupButton(btnCash, function()
-				-- CLICK LOGIC
 				local success, msg = TransactionFunc:InvokeServer(skinName, "Cash")
 				if success then
 					print("✅ Bought with Cash!")
-					-- Optional: Play success sound or update UI here
 					if Kit and Kit.Sound then Kit.Sound:Play("Purchase") end
 				else
 					warn("❌ Purchase Failed: " .. tostring(msg))
@@ -153,10 +195,8 @@ local function ConnectCard(cardFrame, skinName)
 	-- 💎 ROBUX BUTTON
 	local btnRobux = buyFrame:FindFirstChild("BuyForRobux")
 	if btnRobux then
-		-- Apply your "Dim" effect
 		if Kit and Kit.Tween then
 			Kit.Tween:SetupButton(btnRobux, function()
-				-- CLICK LOGIC
 				TransactionFunc:InvokeServer(skinName, "Robux") 
 			end)
 		end
@@ -167,8 +207,8 @@ local function SetupShop()
 	local gui = PlayerGui:WaitForChild(UI_NAME, 5)
 	if not gui then return end
 
-	local scroller = gui:FindFirstChild(SCROLLER_NAME, true) -- Finds recursive
-	if not scroller then return end -- Might not be loaded yet
+	local scroller = gui:FindFirstChild(SCROLLER_NAME, true) 
+	if not scroller then return end 
 
 	-- 1. CONNECT CARD 1 (Gold)
 	local card1 = scroller:FindFirstChild("Card1")
@@ -188,28 +228,25 @@ local function setVisible(isOpen)
 	if not frame then return warn("⚠️ MainFrame not found") end
 
 	if isOpen then
-		-- OPENING SEQUENCE
 		toggleOtherGuis(true)
-		toggleNamedGuiObjects(true, "FriendBoost") -- ✅ Hides Friend Boost
-		setBlur(true)                              -- ✅ Adds Blur
-		setMovement(false)                         -- ✅ Stops Player
+		toggleNamedGuiObjects(true, "FriendBoost") 
+		setBlur(true)                              
+		setMovement(false)                         
 
-		-- ✅ Initialize Buttons when opening (Just in case they reset)
-		SetupShop()
+		SetupShop() -- Refresh Shop
 
 		gui.Enabled = true
 		frame.Visible = true
 
 		if Kit and Kit.Sound then Kit.Sound:Play("Open") end
 	else
-		-- CLOSING SEQUENCE
 		gui.Enabled = false
 		frame.Visible = false
 
 		setBlur(false)
 		toggleOtherGuis(false)
 		toggleNamedGuiObjects(false, "FriendBoost")
-		setMovement(true) -- ✅ Restores Movement
+		setMovement(true) 
 	end
 end
 
@@ -223,12 +260,10 @@ task.spawn(function()
 	local gui = PlayerGui:WaitForChild(UI_NAME, 10)
 	if not gui then return end
 
-	-- ✅ FORCE HIDE ON JOIN (Fixes "Visible in Studio" issue)
 	gui.Enabled = false 
 	local frame = gui:WaitForChild(FRAME_NAME, 10)
 	if frame then frame.Visible = false end
 
-	-- Setup Button
 	local closeBtn = frame and frame:WaitForChild(CLOSE_BTN_NAME, 10)
 	if not closeBtn then return end
 
@@ -238,6 +273,5 @@ task.spawn(function()
 		closeBtn.MouseButton1Click:Connect(function() setVisible(false) end)
 	end
 
-	-- Initial Shop Setup
 	SetupShop()
 end)
