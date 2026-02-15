@@ -1,5 +1,5 @@
--- [[ SERVER SCRIPT: PadSkinManager (SMART RESTORE) ]]
--- Purpose: Visual Handler. Paints Gold, but REMEMBERS original colors to restore them later.
+-- [[ SERVER SCRIPT: PadSkinManager (INSTANT FIX) ]]
+-- Purpose: Visual Handler. Paints Gold, and FORCE RESTORES default if stuck.
 -- Location: ServerScriptService
 
 local Players = game:GetService("Players")
@@ -9,28 +9,50 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 local BaseSkinStats = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
 
--- 💾 MEMORY SYSTEM (To remember original colors)
--- Uses weak keys so it doesn't leak memory if parts are destroyed
-local OriginalStateCache = {}
-setmetatable(OriginalStateCache, {__mode = "k"}) 
+-- ============================================================================
+-- 🎨 CONFIGURATION (THE "NORMAL" LOOK)
+-- Change these if your pads are not Grey/Plastic!
+-- ============================================================================
+local DEFAULT_COLOR = Color3.fromRGB(163, 162, 165) -- Standard Medium Stone Grey
+local DEFAULT_MATERIAL = Enum.Material.Plastic
+local DEFAULT_REFLECTANCE = 0
 
 -- 🛑 EXCLUSION CHECK
 local function IsIgnored(part)
 	if part.Name == "BuyButton" then return true end
 	if part.Parent and part.Parent.Name == "BuyButton" then return true end
 	if part.Name == "Price" or part.Name == "PriceLabel" then return true end
-	if part.Transparency >= 1 then return true end -- Don't paint invisible triggers
+	if part.Transparency >= 1 then return true end 
 	return false
 end
 
--- 🎨 THE SMART PAINT ENGINE
+-- 💾 SAVE STATE (With Safety Check)
+local function EnsureOriginalStateSaved(part)
+	if part:GetAttribute("Skin_OrigColor") then return end -- Already saved
+
+	-- CHECK: Is it ALREADY Gold? (The Bug)
+	-- If it is Gold/Neon, DO NOT save this as the "Original". It's wrong!
+	local isSuspectGold = (part.Material == Enum.Material.Metal or part.Material == Enum.Material.Neon) 
+		and (part.Color == Color3.fromRGB(255, 215, 0) or part.Color == Color3.fromRGB(255, 255, 0))
+
+	if isSuspectGold then
+		-- It's bugged. We don't save this. We will rely on the DEFAULT constants above.
+		return
+	end
+
+	-- It looks normal, so save it!
+	part:SetAttribute("Skin_OrigColor", part.Color)
+	part:SetAttribute("Skin_OrigMat", part.Material.Name)
+	part:SetAttribute("Skin_OrigRef", part.Reflectance)
+end
+
+-- 🎨 THE PAINT ENGINE
 local function PaintPlot(plot, skinName)
 	if not plot then return end
 
 	local skinData = BaseSkinStats[skinName]
 	local isDefault = (skinName == "Default" or skinName == nil)
 
-	-- If not default and no data, stop
 	if not isDefault and not skinData then return end
 
 	local padsFolder = plot:FindFirstChild("Pads")
@@ -42,44 +64,42 @@ local function PaintPlot(plot, skinName)
 
 		-- 1. GATHER PARTS
 		local partsToPaint = {}
-
-		-- Check model itself
 		if padModel:IsA("BasePart") and not IsIgnored(padModel) then
 			table.insert(partsToPaint, padModel)
 		end
-
-		-- Check children
 		for _, part in pairs(padModel:GetDescendants()) do
 			if part:IsA("BasePart") and not IsIgnored(part) then
 				table.insert(partsToPaint, part)
 			end
 		end
 
-		-- 2. CAPTURE ORIGINAL STATE (Before we change anything!)
+		-- 2. TRY TO SAVE ORIGINALS (Will skip if currently Gold/Bugged)
 		for _, part in ipairs(partsToPaint) do
-			if not OriginalStateCache[part] then
-				OriginalStateCache[part] = {
-					Color = part.Color,
-					Material = part.Material,
-					Reflectance = part.Reflectance
-				}
-			end
+			EnsureOriginalStateSaved(part)
 		end
 
 		-- 3. APPLY OR RESTORE
 		if isDefault then
-			-- 🔙 RESTORE ORIGINALS (Cancel the Paint)
+			-- 🔙 RESTORE MODE
 			for _, part in ipairs(partsToPaint) do
-				local original = OriginalStateCache[part]
-				if original then
-					part.Color = original.Color
-					part.Material = original.Material
-					part.Reflectance = original.Reflectance
+				local origColor = part:GetAttribute("Skin_OrigColor")
+				local origMat = part:GetAttribute("Skin_OrigMat")
+				local origRef = part:GetAttribute("Skin_OrigRef")
+
+				if origColor and origMat then
+					-- ✅ CASE A: We have memory. Restore exactly.
+					part.Color = origColor
+					part.Material = Enum.Material[origMat]
+					part.Reflectance = origRef or 0
+				else
+					-- ⚠️ CASE B: No memory (It was stuck Gold). FORCE FIX using Defaults.
+					part.Color = DEFAULT_COLOR
+					part.Material = DEFAULT_MATERIAL
+					part.Reflectance = DEFAULT_REFLECTANCE
 				end
 			end
 		else
-			-- ✨ APPLY GOLD SKIN
-			-- Sort: Biggest part gets Metal, small parts get Neon
+			-- ✨ GOLD MODE
 			table.sort(partsToPaint, function(a, b)
 				local volA = a.Size.X * a.Size.Y * a.Size.Z
 				local volB = b.Size.X * b.Size.Y * b.Size.Z
@@ -88,13 +108,10 @@ local function PaintPlot(plot, skinName)
 
 			for i, part in ipairs(partsToPaint) do
 				part.Color = skinData.Color
-
 				if i == 1 then
-					-- Base = Shiny Metal
 					part.Material = Enum.Material.Metal
 					part.Reflectance = 0.4
 				else
-					-- Details = Neon
 					part.Material = Enum.Material.Neon
 					part.Reflectance = 0
 				end
@@ -115,11 +132,11 @@ local function SetupPlayer(player)
 		local plot = TycoonFolder:WaitForChild(plotName, 10)
 		if not plot then return end
 
-		-- A. Initial Check (Will capture defaults if no skin equipped)
+		-- Check State immediately to fix any stuck pads
 		local currentSkin = player:GetAttribute("EquippedSkin") or "Default"
 		PaintPlot(plot, currentSkin)
 
-		-- B. Live Listener
+		-- Live Listener
 		player:GetAttributeChangedSignal("EquippedSkin"):Connect(function()
 			local newSkin = player:GetAttribute("EquippedSkin")
 			PaintPlot(plot, newSkin)
@@ -129,3 +146,9 @@ end
 
 Players.PlayerAdded:Connect(SetupPlayer)
 for _, p in pairs(Players:GetPlayers()) do SetupPlayer(p) end
+
+-- 🚑 EMERGENCY CLEANUP ON STARTUP
+-- Use this loop to catch any players already in-game when you update the script
+for _, p in pairs(Players:GetPlayers()) do
+	SetupPlayer(p)
+end
