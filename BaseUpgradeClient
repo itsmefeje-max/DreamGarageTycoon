@@ -1,16 +1,20 @@
 -- [[ LOCAL SCRIPT: BaseUpgradeClient ]]
--- Purpose: Opens UI, Freezes Player, Blurs Screen, and Hides FriendBoost.
+-- Purpose: Opens UI, Freezes Player, Blurs Screen, Hides FriendBoost, AND Handles Purchases.
 -- Location: StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local Lighting = game:GetService("Lighting") -- ✅ Added for Blur
+local Lighting = game:GetService("Lighting")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
 local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
+
+-- 📡 NETWORKING
 local OpenEvent = Remotes:WaitForChild("OpenBaseUpgrade")
+local TransactionFunc = Remotes:WaitForChild("BaseUpgradeTransaction") -- ✅ Added for Buying
 
 -- 📦 REQUIRE KIT (For Sound & Animations)
 local Kit
@@ -21,16 +25,17 @@ end)
 -- ⚙️ CONFIGURATION
 local UI_NAME = "BaseUpgradeUI"
 local FRAME_NAME = "MainFrame"
+local SCROLLER_NAME = "UpgradeScroller" -- ✅ Added for Shop
 local CLOSE_BTN_NAME = "CloseButton"
-local BLUR_SIZE = 24 -- How blurry the background gets
+local BLUR_SIZE = 24 
 
 -- 🛡️ STATE TRACKING
 local hiddenGuis = {} 
-local hiddenObjects = {} -- Specifically for FriendBoost
+local hiddenObjects = {} 
 local currentBlur = nil 
 
 -- ============================================================================
--- 🛠️ HELPER FUNCTIONS
+-- 🛠️ HELPER FUNCTIONS (Preserved from your script)
 -- ============================================================================
 
 -- 1. BLUR EFFECT
@@ -118,7 +123,62 @@ local function setMovement(active)
 end
 
 -- ============================================================================
--- 🔄 MAIN VISIBILITY TOGGLE
+-- 🛍️ NEW SHOP LOGIC (Integrated)
+-- ============================================================================
+
+local function ConnectCard(cardFrame, skinName)
+	local buyFrame = cardFrame:FindFirstChild("BuyFrame")
+	if not buyFrame then return end
+
+	-- 💵 CASH BUTTON
+	local btnCash = buyFrame:FindFirstChild("BuyForCash")
+	if btnCash then
+		-- Apply your "Dim" effect
+		if Kit and Kit.Tween then
+			Kit.Tween:SetupButton(btnCash, function()
+				-- CLICK LOGIC
+				local success, msg = TransactionFunc:InvokeServer(skinName, "Cash")
+				if success then
+					print("✅ Bought with Cash!")
+					-- Optional: Play success sound or update UI here
+					if Kit and Kit.Sound then Kit.Sound:Play("Purchase") end
+				else
+					warn("❌ Purchase Failed: " .. tostring(msg))
+					if Kit and Kit.Sound then Kit.Sound:Play("Error") end
+				end
+			end)
+		end
+	end
+
+	-- 💎 ROBUX BUTTON
+	local btnRobux = buyFrame:FindFirstChild("BuyForRobux")
+	if btnRobux then
+		-- Apply your "Dim" effect
+		if Kit and Kit.Tween then
+			Kit.Tween:SetupButton(btnRobux, function()
+				-- CLICK LOGIC
+				TransactionFunc:InvokeServer(skinName, "Robux") 
+			end)
+		end
+	end
+end
+
+local function SetupShop()
+	local gui = PlayerGui:WaitForChild(UI_NAME, 5)
+	if not gui then return end
+
+	local scroller = gui:FindFirstChild(SCROLLER_NAME, true) -- Finds recursive
+	if not scroller then return end -- Might not be loaded yet
+
+	-- 1. CONNECT CARD 1 (Gold)
+	local card1 = scroller:FindFirstChild("Card1")
+	if card1 then
+		ConnectCard(card1, "Gold") 
+	end
+end
+
+-- ============================================================================
+-- 🔄 MAIN VISIBILITY TOGGLE (Integrated)
 -- ============================================================================
 local function setVisible(isOpen)
 	local gui = PlayerGui:WaitForChild(UI_NAME, 5)
@@ -133,6 +193,9 @@ local function setVisible(isOpen)
 		toggleNamedGuiObjects(true, "FriendBoost") -- ✅ Hides Friend Boost
 		setBlur(true)                              -- ✅ Adds Blur
 		setMovement(false)                         -- ✅ Stops Player
+
+		-- ✅ Initialize Buttons when opening (Just in case they reset)
+		SetupShop()
 
 		gui.Enabled = true
 		frame.Visible = true
@@ -155,7 +218,7 @@ OpenEvent.OnClientEvent:Connect(function()
 	setVisible(true)
 end)
 
--- ❌ CLOSE BUTTON LOGIC
+-- ❌ CLOSE BUTTON LOGIC & STARTUP
 task.spawn(function()
 	local gui = PlayerGui:WaitForChild(UI_NAME, 10)
 	if not gui then return end
@@ -174,4 +237,7 @@ task.spawn(function()
 	else
 		closeBtn.MouseButton1Click:Connect(function() setVisible(false) end)
 	end
+
+	-- Initial Shop Setup
+	SetupShop()
 end)
