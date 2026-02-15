@@ -1,0 +1,66 @@
+-- [[ SERVER SCRIPT: BaseUpgradeTransactionHandler ]]
+-- Purpose: Handles Cash/Robux verification for Base Skins.
+-- Location: ServerScriptService
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+
+local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
+local TransactionFunc = Remotes:WaitForChild("BaseUpgradeTransaction")
+local StatsModule = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
+
+-- 💰 CASH PURCHASE
+TransactionFunc.OnServerInvoke = function(player, skinName, currencyType)
+	local skinData = StatsModule[skinName]
+	if not skinData then return false, "Invalid Skin" end
+
+	-- 1. HANDLE CASH
+	if currencyType == "Cash" then
+		local leaderstats = player:FindFirstChild("leaderstats")
+		local cash = leaderstats and leaderstats:FindFirstChild("Cash") -- Or "Wallet" based on your system
+
+		if cash and cash.Value >= skinData.PriceCash then
+			-- A. Deduct Money
+			cash.Value = cash.Value - skinData.PriceCash
+
+			-- B. Save Ownership (We will connect to DataHandler next)
+			-- For now, we just set the attribute so it works instantly
+			player:SetAttribute("EquippedSkin", skinName)
+
+			print("✅ " .. player.Name .. " bought " .. skinName)
+			return true, "Success"
+		else
+			return false, "Not Enough Cash"
+		end
+
+		-- 2. HANDLE ROBUX (Trigger Prompt)
+	elseif currencyType == "Robux" then
+		if skinData.ProductId > 0 then
+			MarketplaceService:PromptProductPurchase(player, skinData.ProductId)
+			return true, "Prompted"
+		else
+			return false, "No Product ID Configured"
+		end
+	end
+
+	return false, "Invalid Currency"
+end
+
+-- 💎 ROBUX COMPLETION (Standard Receipt Handler)
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+
+	-- Find which skin matches this Product ID
+	for skinName, data in pairs(StatsModule) do
+		if data.ProductId == receiptInfo.ProductId then
+			-- Grant the Skin
+			player:SetAttribute("EquippedSkin", skinName)
+			print("💎 " .. player.Name .. " bought " .. skinName .. " with Robux!")
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+	end
+
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
