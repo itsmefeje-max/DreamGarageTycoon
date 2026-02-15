@@ -1,8 +1,8 @@
--- [[ SERVER SIDE: TycoonDataHandler (SECURE V38 - SHOP SYNC + DUPE FIX) ]]
+-- [[ SERVER SIDE: TycoonDataHandler (SECURE V38 - SHOP SYNC + DUPE FIX + SKINS) ]]
 -- -- Purpose: Handles all DataStore operations, Security Validation, and Session Management.
 -- -- Runs on: Server
 -- -- Location: ServerScriptService
--- -- FIXES: Inventory Duplication (Double-Count), Shop Stock Bypass, Pad Sync
+-- -- FIXES: Inventory Duplication (Double-Count), Shop Stock Bypass, Pad Sync, Base Skins
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -14,7 +14,7 @@ local HttpService = game:GetService("HttpService")
 -- ----------------------------------------------------------------------------
 -- ⚙️ CONFIGURATION & CONSTANTS
 -- ----------------------------------------------------------------------------
-local DATA_KEY = "TycoonData_Release_V27_Optimizedddddddddddd" 
+local DATA_KEY = "TycoonData_Release_V27_Optimizeddddddddddddd" 
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 local AUTOSAVE_INTERVAL = 180        
@@ -301,7 +301,7 @@ AdminAPI.OnInvoke = function(action, player)
 end
 
 -- ----------------------------------------------------------------------------
--- 💾 SAVING (V38 - SHOP SYNC + DUPE FIX)
+-- 💾 SAVING (V38 - SHOP SYNC + DUPE FIX + SKINS)
 -- ----------------------------------------------------------------------------
 local function save(player, isClosing)
 	local session = SessionData[player]
@@ -332,6 +332,11 @@ local function save(player, isClosing)
 
 		-- ✅ SAFETY FIX: Capture Attribute BEFORE entering UpdateAsync
 		local currentUnlockedPad = player:GetAttribute("HighestUnlockedPad") or 1
+
+		-- ✅ SKINS CAPTURE: Capture Skins BEFORE entering UpdateAsync
+		local currentOwnedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
+		local currentOwnedSkins = HttpService:JSONDecode(currentOwnedRaw)
+		local currentEquippedSkin = player:GetAttribute("EquippedSkin") or "Default"
 
 		local inventory = {}
 		local invCount = 0
@@ -456,6 +461,10 @@ local function save(player, isClosing)
 					-- ✅ SHOP DATA
 					oldData.ShopPurchases = currentShopData
 
+					-- ✅ SKINS DATA (New)
+					oldData.OwnedBaseSkins = currentOwnedSkins
+					oldData.EquippedSkin = currentEquippedSkin
+
 					-- ✅ SAVING: Use captured variable instead of player object
 					oldData.HighestUnlockedPad = currentUnlockedPad
 
@@ -521,11 +530,13 @@ local function InitializePlayer(player)
 
 	if not success then player:Kick("Data Load Error. Rejoin.") return end
 
-	-- ✅ INITIALIZE DEFAULT DATA
-	data = data or { Inventory = {}, Layout = {}, PendingEarnings = 0, HighestUnlockedPad = 1, ShopPurchases = {} }
+	-- ✅ INITIALIZE DEFAULT DATA (Now includes OwnedBaseSkins)
+	data = data or { Inventory = {}, Layout = {}, PendingEarnings = 0, HighestUnlockedPad = 1, ShopPurchases = {}, OwnedBaseSkins = {"Default"}, EquippedSkin = "Default" }
 	data.Inventory = data.Inventory or {}
 	data.Layout = data.Layout or {}
 	data.ShopPurchases = data.ShopPurchases or {}
+	data.OwnedBaseSkins = data.OwnedBaseSkins or {"Default"}
+	data.EquippedSkin = data.EquippedSkin or "Default"
 
 	cash.Value = data.Bank or 0
 	wallet.Value = data.Wallet or 0
@@ -537,11 +548,18 @@ local function InitializePlayer(player)
 		shopBindable:Invoke("Load", player, data.ShopPurchases or {})
 	end
 
-	-- ✅ APPLY ATTRIBUTE
+	-- ✅ APPLY ATTRIBUTES (New Skins Logic)
 	player:SetAttribute("HighestUnlockedPad", data.HighestUnlockedPad or 1)
+
+	-- Sync Skins to Client via Attributes
+	local ownedJson = HttpService:JSONEncode(data.OwnedBaseSkins)
+	player:SetAttribute("OwnedBaseSkins", ownedJson)
+	player:SetAttribute("EquippedSkin", data.EquippedSkin)
 
 	-- ✅ MARK DIRTY ON CHANGE
 	player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(setDirty)
+	player:GetAttributeChangedSignal("OwnedBaseSkins"):Connect(setDirty)
+	player:GetAttributeChangedSignal("EquippedSkin"):Connect(setDirty)
 
 	-- 🛑 CLEAR DUPLICATE ITEMS
 	if player:FindFirstChild("Backpack") then player.Backpack:ClearAllChildren() end
