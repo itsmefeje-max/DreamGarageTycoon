@@ -1,6 +1,14 @@
+-- Purpose: Centralizes MarketplaceService.ProcessReceipt to handle all product purchases (Cars, Boosts, Skins).
+-- Runs on: Server
+-- Location: ServerScriptService
+-- Dependencies: MarketplaceService, ServerStorage (CarTools), ReplicatedStorage (BaseSkinStats)
+-- Public API: MarketplaceService.ProcessReceipt (Callback)
+-- Security: Server-side validation, secure asset cloning, ownership attributes, error handling for missing assets.
+-- Notes: Fixes a critical crash where buying an item while dead (no Backpack) caused the script to error.
+
 -- [[ SERVER SCRIPT: ReceiptRouter ]]
 -- Centralizes MarketplaceService.ProcessReceipt for the entire game.
--- UPDATED: Adds Base Skin Support (Gold Upgrade) + Fixes Infinite Yield.
+-- UPDATED: Fixes "Backpack Missing" Crash + Base Skin Support.
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
@@ -71,9 +79,9 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		end
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 
-		-- ====================================================
-		-- 2️⃣ PRODUCT: SHOP REROLL (Restock)
-		-- ====================================================
+	-- ====================================================
+	-- 2️⃣ PRODUCT: SHOP REROLL (Restock)
+	-- ====================================================
 	elseif pid == SHOP_REROLL_ID then
 		if ShopRerollFunc then
 			ShopRerollFunc:Invoke(player) 
@@ -83,9 +91,9 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 
-		-- ====================================================
-		-- 3️⃣ PRODUCT: BASE SKINS (Gold Upgrade) ✅ NEW
-		-- ====================================================
+	-- ====================================================
+	-- 3️⃣ PRODUCT: BASE SKINS (Gold Upgrade) ✅ NEW
+	-- ====================================================
 	elseif BaseSkinStats then
 		-- Search the module to see if this ID matches a skin
 		local skinFound = nil
@@ -102,7 +110,8 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			-- Grant Ownership
 			local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
 			local ownedTable = {}
-			pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
+			local success, _ = pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
+			if not success then ownedTable = {} end -- Fallback if decode fails
 
 			if not table.find(ownedTable, skinFound) then
 				table.insert(ownedTable, skinFound)
@@ -134,9 +143,19 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			newTool:SetAttribute("IssuedAt", os.time())
 			newTool:SetAttribute("ToolId", tool.Name) -- Critical for Anti-Cheat
 
-			newTool.Parent = player.Backpack
+			-- 🛡️ FIX: SAFE BACKPACK CHECK
+			-- If player is dead, Backpack is nil. We skip parenting to Backpack 
+			-- and rely on StarterGear to give it to them on respawn.
+			local backpack = player:FindFirstChild("Backpack")
+			if backpack then
+				newTool.Parent = backpack
+			else
+				warn("⚠️ Player dead/respawning during purchase. Item added to StarterGear only.")
+			end
+			
+			-- Always add to StarterGear so they keep it after death
 			local gearClone = newTool:Clone()
-			gearClone.Parent = player.StarterGear
+			gearClone.Parent = player:WaitForChild("StarterGear")
 
 			print("✅ Gave Robux Car: " .. carName)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
