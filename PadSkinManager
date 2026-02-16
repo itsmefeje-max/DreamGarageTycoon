@@ -1,5 +1,5 @@
--- [[ SERVER SCRIPT: PadSkinManager (INSTANT FIX) ]]
--- Purpose: Visual Handler. Paints Gold, and FORCE RESTORES default if stuck.
+-- [[ SERVER SCRIPT: PadSkinManager (DIAMOND + RAINBOW SUPPORT) ]]
+-- Purpose: Visual Handler. Paints Gold/Diamond. Handles Rainbow Tags & Safety.
 -- Location: ServerScriptService
 
 local Players = game:GetService("Players")
@@ -11,9 +11,8 @@ local BaseSkinStats = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
 
 -- ============================================================================
 -- 🎨 CONFIGURATION (THE "NORMAL" LOOK)
--- Change these if your pads are not Grey/Plastic!
 -- ============================================================================
-local DEFAULT_COLOR = Color3.fromRGB(163, 162, 165) -- Standard Medium Stone Grey
+local DEFAULT_COLOR = Color3.fromRGB(163, 162, 165) 
 local DEFAULT_MATERIAL = Enum.Material.Plastic
 local DEFAULT_REFLECTANCE = 0
 
@@ -26,17 +25,17 @@ local function IsIgnored(part)
 	return false
 end
 
--- 💾 SAVE STATE (With Safety Check)
+-- 💾 SAVE STATE (Updated for Diamond Safety)
 local function EnsureOriginalStateSaved(part)
-	if part:GetAttribute("Skin_OrigColor") then return end -- Already saved
+	if part:GetAttribute("Skin_OrigColor") then return end 
 
-	-- CHECK: Is it ALREADY Gold? (The Bug)
-	-- If it is Gold/Neon, DO NOT save this as the "Original". It's wrong!
-	local isSuspectGold = (part.Material == Enum.Material.Metal or part.Material == Enum.Material.Neon) 
-		and (part.Color == Color3.fromRGB(255, 215, 0) or part.Color == Color3.fromRGB(255, 255, 0))
+	-- CHECK: Is it ALREADY Gold OR Diamond?
+	-- We check for Gold (255, 215, 0) AND Diamond Cyan (85, 255, 255)
+	local isSuspect = (part.Material == Enum.Material.Metal or part.Material == Enum.Material.Neon) 
+		and (part.Color == Color3.fromRGB(255, 215, 0) or part.Color == Color3.fromRGB(85, 255, 255)) 
 
-	if isSuspectGold then
-		-- It's bugged. We don't save this. We will rely on the DEFAULT constants above.
+	if isSuspect then
+		-- It looks like a skin. DO NOT save this as "Original".
 		return
 	end
 
@@ -73,7 +72,7 @@ local function PaintPlot(plot, skinName)
 			end
 		end
 
-		-- 2. TRY TO SAVE ORIGINALS (Will skip if currently Gold/Bugged)
+		-- 2. SAVE ORIGINALS
 		for _, part in ipairs(partsToPaint) do
 			EnsureOriginalStateSaved(part)
 		end
@@ -82,24 +81,28 @@ local function PaintPlot(plot, skinName)
 		if isDefault then
 			-- 🔙 RESTORE MODE
 			for _, part in ipairs(partsToPaint) do
+				-- 🛑 CLEANUP: Remove Rainbow Tag
+				part:SetAttribute("IsRainbow", nil) 
+
 				local origColor = part:GetAttribute("Skin_OrigColor")
 				local origMat = part:GetAttribute("Skin_OrigMat")
 				local origRef = part:GetAttribute("Skin_OrigRef")
 
 				if origColor and origMat then
-					-- ✅ CASE A: We have memory. Restore exactly.
 					part.Color = origColor
 					part.Material = Enum.Material[origMat]
 					part.Reflectance = origRef or 0
 				else
-					-- ⚠️ CASE B: No memory (It was stuck Gold). FORCE FIX using Defaults.
+					-- Fallback Fix
 					part.Color = DEFAULT_COLOR
 					part.Material = DEFAULT_MATERIAL
 					part.Reflectance = DEFAULT_REFLECTANCE
 				end
 			end
 		else
-			-- ✨ GOLD MODE
+			-- ✨ SKIN MODE (GOLD OR DIAMOND)
+
+			-- Sort: Biggest part first (for Gold metal base)
 			table.sort(partsToPaint, function(a, b)
 				local volA = a.Size.X * a.Size.Y * a.Size.Z
 				local volB = b.Size.X * b.Size.Y * b.Size.Z
@@ -107,13 +110,25 @@ local function PaintPlot(plot, skinName)
 			end)
 
 			for i, part in ipairs(partsToPaint) do
-				part.Color = skinData.Color
-				if i == 1 then
-					part.Material = Enum.Material.Metal
-					part.Reflectance = 0.4
-				else
-					part.Material = Enum.Material.Neon
+				-- Apply Base Color (Gold or Cyan)
+				part.Color = skinData.Color 
+
+				-- 🌈 HANDLE DIAMOND RAINBOW
+				if skinData.IsRainbow then
+					part:SetAttribute("IsRainbow", true) -- ✅ Signal for Client
+					part.Material = Enum.Material.Neon   -- Neon looks best for rainbow
 					part.Reflectance = 0
+				else
+					-- 🥇 HANDLE GOLD
+					part:SetAttribute("IsRainbow", nil) -- Ensure off
+
+					if i == 1 then
+						part.Material = Enum.Material.Metal -- Base is Metal
+						part.Reflectance = 0.4
+					else
+						part.Material = Enum.Material.Neon -- Details are Neon
+						part.Reflectance = 0
+					end
 				end
 			end
 		end
@@ -132,11 +147,9 @@ local function SetupPlayer(player)
 		local plot = TycoonFolder:WaitForChild(plotName, 10)
 		if not plot then return end
 
-		-- Check State immediately to fix any stuck pads
 		local currentSkin = player:GetAttribute("EquippedSkin") or "Default"
 		PaintPlot(plot, currentSkin)
 
-		-- Live Listener
 		player:GetAttributeChangedSignal("EquippedSkin"):Connect(function()
 			local newSkin = player:GetAttribute("EquippedSkin")
 			PaintPlot(plot, newSkin)
@@ -147,8 +160,5 @@ end
 Players.PlayerAdded:Connect(SetupPlayer)
 for _, p in pairs(Players:GetPlayers()) do SetupPlayer(p) end
 
--- 🚑 EMERGENCY CLEANUP ON STARTUP
--- Use this loop to catch any players already in-game when you update the script
-for _, p in pairs(Players:GetPlayers()) do
-	SetupPlayer(p)
-end
+-- 🚑 EMERGENCY CLEANUP
+for _, p in pairs(Players:GetPlayers()) do SetupPlayer(p) end
