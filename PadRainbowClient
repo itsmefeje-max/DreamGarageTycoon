@@ -1,85 +1,50 @@
--- [[ LOCAL SCRIPT: PadRainbowClient ]]
--- Purpose: Finds pads tagged with "IsRainbow" and cycles their colors smoothly.
+-- [[ LOCAL SCRIPT: PadRainbowClient (TAG FIX) ]]
+-- Purpose: Animates parts tagged with "RainbowEffect".
 -- Location: StarterPlayerScripts
 
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService") -- ✅ Using CollectionService
 
 -- ⚙️ CONFIGURATION
-local RAINBOW_SPEED = 0.5   -- How fast the colors switch (Lower = Slower)
-local SATURATION = 1        -- 1 = Deep Neon, 0.5 = Pastel
-local VALUE = 1             -- 1 = Bright, 0.5 = Dark
+local RAINBOW_SPEED = 0.2
+local SATURATION = 1
+local VALUE = 1
 
--- 🔍 TRACKING TABLE
+-- 🔍 TRACKING
 local rainbowParts = {}
 
--- 🌈 1. THE COLOR ANIMATION LOOP
+-- 🌈 ANIMATION LOOP
 RunService.Heartbeat:Connect(function()
-	-- Calculate the current rainbow color based on time
 	local hue = (tick() * RAINBOW_SPEED) % 1
-	local rainbowColor = Color3.fromHSV(hue, SATURATION, VALUE)
+	local color = Color3.fromHSV(hue, SATURATION, VALUE)
 
-	-- Apply to all tracked parts
 	for part, _ in pairs(rainbowParts) do
-		if part and part.Parent and part:GetAttribute("IsRainbow") then
-			part.Color = rainbowColor
+		if part and part.Parent then
+			part.Color = color
 		else
-			-- Stop tracking if part is destroyed or attribute removed
 			rainbowParts[part] = nil
 		end
 	end
 end)
 
--- 🛠️ 2. TRACKING FUNCTIONS
-local function StartAnimating(part)
+-- 🛠️ TRACKING HELPERS
+local function onTagAdded(part)
 	if part:IsA("BasePart") then
 		rainbowParts[part] = true
 	end
 end
 
-local function StopAnimating(part)
+local function onTagRemoved(part)
 	rainbowParts[part] = nil
 end
 
--- 🕵️ 3. SCANNER (Finds existing pads)
-local function ScanForRainbows()
-	for _, tycoon in pairs(Workspace:WaitForChild("Tycoons"):GetChildren()) do
-		local pads = tycoon:FindFirstChild("Pads")
-		if pads then
-			for _, padModel in pairs(pads:GetChildren()) do
-				for _, part in pairs(padModel:GetDescendants()) do
-					-- Check if the Server tagged it as Rainbow
-					if part:IsA("BasePart") and part:GetAttribute("IsRainbow") then
-						StartAnimating(part)
-					end
-				end
-			end
-		end
-	end
+-- 📡 START LISTENING
+-- 1. Get all existing parts (that loaded before script started)
+for _, part in ipairs(CollectionService:GetTagged("RainbowEffect")) do
+	onTagAdded(part)
 end
 
--- 📡 4. LIVE LISTENERS (Detects when you Equip/Unequip)
--- Watch for new parts (Buying items)
-Workspace.DescendantAdded:Connect(function(descendant)
-	if descendant:IsA("BasePart") then
-		-- Wait a tiny bit for attributes to replicate
-		task.wait(0.1) 
-		if descendant:GetAttribute("IsRainbow") then
-			StartAnimating(descendant)
-		end
-	end
-end)
-
--- Watch for Attribute changes (Equipping skins)
-game.DescendantAttributeChanged:Connect(function(descendant, attr)
-	if attr == "IsRainbow" and descendant:IsA("BasePart") then
-		if descendant:GetAttribute("IsRainbow") then
-			StartAnimating(descendant) -- Turned ON
-		else
-			StopAnimating(descendant)  -- Turned OFF
-		end
-	end
-end)
-
--- Start immediately
-ScanForRainbows()
+-- 2. Listen for new parts (Streamed in or newly painted)
+-- This is 100% reliable unlike AttributeChanged
+CollectionService:GetInstanceAddedSignal("RainbowEffect"):Connect(onTagAdded)
+CollectionService:GetInstanceRemovedSignal("RainbowEffect"):Connect(onTagRemoved)
