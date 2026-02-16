@@ -1,4 +1,5 @@
 local BaseSkinStats = {
+	-- 🥇 TIER 1: GOLD
 	["Gold"] = {
 		Name = "Midas Touch",
 		Description = "Goldify your Base + 25% Cash Boost",
@@ -15,9 +16,30 @@ local BaseSkinStats = {
 		Image = "rbxassetid://0", -- ✅ I entered your ID here for the Icon
 		Color = Color3.fromRGB(255, 215, 0),
 		Material = Enum.Material.Metal,
+		IsRainbow = false,
 
 		-- 📈 EFFECT
 		Multiplier = 1.25
+	},
+
+	-- 💎 TIER 2: DIAMOND (NEW)
+	["Diamond"] = {
+		Name = "Diamond Prestige",
+		Description = "Rainbow Gradient + 75% Cash Boost",
+
+		-- 💰 PRICES
+		PriceCash = 45000000,  -- $45 Million
+		PriceRobux = 459,      -- 459 Robux
+		ProductId = 3538539066, -- ✅ Diamond Dev Product ID
+
+		-- 🎨 VISUALS
+		Image = "rbxassetid://0", 
+		Color = Color3.fromRGB(85, 255, 255), -- Cyan Base (for when rainbow is off)
+		Material = Enum.Material.Neon,        -- Neon for Glow
+		IsRainbow = true,                     -- ✅ Special Rainbow Effect
+
+		-- 📈 EFFECT
+		Multiplier = 1.75 -- +75% Boost
 	}
 }
 
