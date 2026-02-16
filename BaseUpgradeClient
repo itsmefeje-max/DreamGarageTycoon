@@ -1,5 +1,5 @@
--- [[ LOCAL SCRIPT: BaseUpgradeClient (UPDATED FOR DIAMOND) ]]
--- Purpose: Shop UI, Feedback, Sounds, and EQUIP/UNEQUIP Logic for Gold & Diamond.
+-- [[ LOCAL SCRIPT: BaseUpgradeClient (UPDATED FOR RAINBOW) ]]
+-- Purpose: Shop UI, Feedback, Sounds, and EQUIP/UNEQUIP Logic for Gold, Diamond & Rainbow.
 -- Location: StarterPlayerScripts
 
 local Players = game:GetService("Players")
@@ -335,9 +335,13 @@ local function SetupShop()
 	local card1 = scroller:FindFirstChild("Card1")
 	if card1 then ConnectCard(card1, "Gold") end
 
-	-- 💎 CARD 2: DIAMOND (NEW)
+	-- 💎 CARD 2: DIAMOND
 	local card2 = scroller:FindFirstChild("Card2")
 	if card2 then ConnectCard(card2, "Diamond") end
+
+	-- 🌈 CARD 3: RAINBOW (NEW)
+	local card3 = scroller:FindFirstChild("Card3")
+	if card3 then ConnectCard(card3, "Rainbow") end
 end
 
 -- ============================================================================
