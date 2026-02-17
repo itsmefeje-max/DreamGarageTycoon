@@ -1,47 +1,85 @@
--- [[ MODULE: BaseSkinStats (FIXED) ]]
+-- [[ MODULE: BaseSkinStats (SILVER + OP TIERS) ]]
 -- Location: ReplicatedStorage
 
 local BaseSkinStats = {
-	-- 🥇 TIER 1: GOLD
+	-- 🥈 TIER 0.5: SILVER (New Entry)
+	["Silver"] = {
+		Name = "Silver Tier",
+		Description = "Shiny Silver. 2x Earnings!",
+
+		-- 💰 PRICES
+		PriceCash = 1000000,   -- $1 Million
+		PriceRobux = 99,       -- 99 Robux
+		ProductId = 3538995092, -- ✅ Silver Dev Product ID
+
+		-- 🎨 VISUALS
+		Image = "rbxassetid://0", 
+		Color = Color3.fromRGB(192, 192, 192), -- Standard Silver
+		Material = Enum.Material.Metal,        -- Metal Look
+		IsRainbow = false,
+
+		-- 📈 EFFECT
+		Multiplier = 2 -- 2x Earnings
+	},
+
+	-- 🥇 TIER 1: GOLD (3x Earnings)
 	["Gold"] = {
 		Name = "Midas Touch",
-		Description = "Goldify your Base + 25% Cash Boost",
-		PriceCash = 7500000,
-		PriceRobux = 149,
-		ProductId = 3537433998,
-		Image = "rbxassetid://0",
+		Description = "Goldify your Base. 3x Earnings!", 
+
+		-- 💰 PRICES
+		PriceCash = 7500000,   -- $7.5 Million
+		PriceRobux = 149,      -- 149 Robux
+		ProductId = 3537433998,         
+
+		-- 🎨 VISUALS
+		Image = "rbxassetid://0", 
 		Color = Color3.fromRGB(255, 215, 0),
 		Material = Enum.Material.Metal,
-		IsRainbow = false, -- ✅ Correct
-		Multiplier = 1.25
+		IsRainbow = false,
+
+		-- 📈 EFFECT
+		Multiplier = 3 -- ✅ UPDATED: 3x Earnings
 	},
 
-	-- 💎 TIER 2: DIAMOND
+	-- 💎 TIER 2: DIAMOND (4x Earnings)
 	["Diamond"] = {
 		Name = "Diamond Prestige",
-		Description = "Cyan Neon + 75% Cash Boost",
-		PriceCash = 45000000,
-		PriceRobux = 459,
-		ProductId = 3538539066,
-		Image = "rbxassetid://0",
-		Color = Color3.fromRGB(85, 255, 255), -- Cyan
-		Material = Enum.Material.Neon,        -- Neon
-		IsRainbow = false,                    -- ✅ FIX: Turned OFF Rainbow for Diamond
-		Multiplier = 1.75
+		Description = "Cyan Neon. 4x Earnings!",
+
+		-- 💰 PRICES
+		PriceCash = 45000000,  -- $45 Million
+		PriceRobux = 459,      -- 459 Robux
+		ProductId = 3538539066, 
+
+		-- 🎨 VISUALS
+		Image = "rbxassetid://0", 
+		Color = Color3.fromRGB(85, 255, 255),
+		Material = Enum.Material.Neon,        
+		IsRainbow = false, -- Static Neon (No Rainbow)
+
+		-- 📈 EFFECT
+		Multiplier = 4 -- ✅ UPDATED: 4x Earnings
 	},
 
-	-- 🌈 TIER 3: RAINBOW
+	-- 🌈 TIER 3: RAINBOW (5x Earnings)
 	["Rainbow"] = {
 		Name = "Rainbow Hyper",
-		Description = "The Final Upgrade. +199% Cash Boost.",
-		PriceCash = 150000000,
-		PriceRobux = 1199,
-		ProductId = 3538565378,
+		Description = "The Final Upgrade. 5x Earnings!",
+
+		-- 💰 PRICES
+		PriceCash = 110000000,  -- $110 Million
+		PriceRobux = 1199,      -- 1,199 Robux
+		ProductId = 3538565378, 
+
+		-- 🎨 VISUALS
 		Image = "rbxassetid://0",
-		Color = Color3.fromRGB(255, 255, 255), -- White Base
+		Color = Color3.fromRGB(255, 255, 255), 
 		Material = Enum.Material.Neon,
-		IsRainbow = true,                      -- ✅ ONLY Rainbow has this ON
-		Multiplier = 2.99
+		IsRainbow = true, -- Animated Rainbow
+
+		-- 📈 EFFECT
+		Multiplier = 5 -- ✅ UPDATED: 5x Earnings
 	}
 }
 
