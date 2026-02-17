@@ -1,0 +1,122 @@
+--[[ SERVER SCRIPT: Universal Car Tool (Optimized v4)
+     Goal: NO equip lag. All heavy work happens once, chunked to avoid server spikes.
+]]
+
+local RunService = game:GetService("RunService")
+
+local Tool = script.Parent
+local Handle = Tool:WaitForChild("Handle")
+
+-- === SETTINGS ===
+local HEIGHT_OFFSET = 2
+local BATCH_SIZE = 200 -- lower = smoother, higher = finishes faster
+local PREPARED_ATTR = "CarToolPrepared"
+-- =================
+
+-- Handle: set once
+Handle.CanCollide = false
+Handle.CanTouch = false
+Handle.CanQuery = false
+Handle.Transparency = 1
+
+local function findCarModel()
+	local m = Tool:FindFirstChildWhichIsA("Model")
+	if m then return m end
+
+	-- Wait until a Model is inserted into the Tool
+	while Tool.Parent do
+		local child = Tool.ChildAdded:Wait()
+		if child:IsA("Model") then
+			return child
+		end
+	end
+end
+
+local function ensurePrimary(model: Model): BasePart?
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+		return model.PrimaryPart
+	end
+
+	-- Fallback: pick the first BasePart we can find
+	local candidate = model:FindFirstChildWhichIsA("BasePart", true)
+	if candidate then
+		model.PrimaryPart = candidate
+		return candidate
+	end
+
+	return nil
+end
+
+local function yieldEvery(i: number)
+	if (i % BATCH_SIZE) == 0 then
+		RunService.Heartbeat:Wait()
+	end
+end
+
+local function prepareOnce()
+	if Tool:GetAttribute(PREPARED_ATTR) then
+		return
+	end
+
+	local CarModel = findCarModel()
+	if not CarModel then return end
+
+	local primary = ensurePrimary(CarModel)
+	if not primary then
+		warn(("[CarTool] Model '%s' has no BaseParts."):format(CarModel.Name))
+		return
+	end
+
+	Tool:SetAttribute(PREPARED_ATTR, true)
+
+	-- Move once relative to the handle (no need to do this on equip)
+	CarModel:PivotTo(Handle.CFrame * CFrame.new(0, HEIGHT_OFFSET, 0))
+
+	-- Link primary to handle (once)
+	local link = Handle:FindFirstChild("HandleLink")
+	if not link then
+		link = Instance.new("WeldConstraint")
+		link.Name = "HandleLink"
+		link.Part0 = Handle
+		link.Part1 = primary
+		link.Parent = Handle
+	end
+
+	-- Ghost + weld all parts to primary (once, chunked)
+	local processed = 0
+	for _, inst in ipairs(CarModel:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			processed += 1
+
+			-- Make it behave like a cosmetic model
+			inst.Anchored = false
+			inst.Massless = true
+			inst.CanCollide = false
+			inst.CanTouch = false
+			inst.CanQuery = false
+			inst.CastShadow = false
+
+			-- Weld every part to primary (prevent duplicates by naming)
+			if inst ~= primary then
+				local w = inst:FindFirstChild("_CarWeld")
+				if not w then
+					w = Instance.new("WeldConstraint")
+					w.Name = "_CarWeld"
+					w.Part0 = primary
+					w.Part1 = inst
+					w.Parent = inst -- easy/fast to check later
+				end
+			end
+
+			yieldEvery(processed)
+		end
+	end
+end
+
+-- Start preparing immediately (not on equip)
+task.spawn(prepareOnce)
+
+-- Equip = zero heavy work
+Tool.Equipped:Connect(function()
+	Handle.Transparency = 1
+end)
