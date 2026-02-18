@@ -1,17 +1,12 @@
--- Purpose: Centralizes MarketplaceService.ProcessReceipt with IDEMPOTENCY to prevent duplicates.
+-- [[ SERVER SCRIPT: ReceiptRouter (UPDATED WITH GIFTING) ]]
+-- Purpose: Centralizes MarketplaceService.ProcessReceipt with IDEMPOTENCY & GIFTING.
 -- Runs on: Server
 -- Location: ServerScriptService
--- Dependencies: MarketplaceService, DataStoreService, ServerStorage, ReplicatedStorage
+-- Dependencies: MarketplaceService, DataStoreService, ServerStorage, ReplicatedStorage, GiftIntentHandler
 -- Public API: MarketplaceService.ProcessReceipt (Callback)
--- Security: Atomic-like Idempotency check (PurchaseId), Server-side validation, Secure asset cloning.
--- Notes: Fixes critical economy bugs (Double Purchases) and "Backpack Missing" crash.
-
--- [[ SERVER SCRIPT: ReceiptRouter ]]
--- Centralizes MarketplaceService.ProcessReceipt for the entire game.
--- UPDATED: Added Purchase History Locking (Fixes Bug #1)
 
 local MarketplaceService = game:GetService("MarketplaceService")
-local DataStoreService = game:GetService("DataStoreService") -- [ADDED]
+local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ServerStorage = game:GetService("ServerStorage")
@@ -39,7 +34,7 @@ local CAR_PRODUCT_IDS = {
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 local ShopRerollFunc = ServerStorage:WaitForChild("ShopRerollFunction")
 
--- ✅ NEW: Base Skin Module Reference
+-- ✅ Base Skin Module Reference
 local BaseSkinStats
 pcall(function()
 	BaseSkinStats = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
@@ -49,14 +44,35 @@ end)
 -- 🧾 MAIN RECEIPT PROCESSOR
 -- ============================================================================
 MarketplaceService.ProcessReceipt = function(receiptInfo)
-	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	local buyerId = receiptInfo.PlayerId
+	local buyerPlayer = Players:GetPlayerByUserId(buyerId)
 
-	-- 1. Handle Player Leaving/Crashing
-	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+	-- 1. Handle Buyer Leaving/Crashing
+	-- Even if gifting, we need the buyer's record to process the ID
+	if not buyerPlayer then return Enum.ProductPurchaseDecision.NotProcessedYet end
+
+	-- 🎁 GIFTING LOGIC: Determine the Recipient
+	local targetPlayer = buyerPlayer -- Default to buyer
+	local isGift = false
+
+	-- Check if the GiftIntentHandler (Global) has a pending gift note for this buyer
+	if _G.GetGiftReceiver then
+		local receiverId = _G.GetGiftReceiver(buyerId)
+		if receiverId then
+			local receiver = Players:GetPlayerByUserId(receiverId)
+			if receiver then
+				targetPlayer = receiver
+				isGift = true
+				print("🎁 GIFT DETECTED! From " .. buyerPlayer.Name .. " to " .. targetPlayer.Name)
+			else
+				warn("⚠️ Gift Receiver (ID: " .. tostring(receiverId) .. ") is offline. Defaulting item to Buyer.")
+			end
+		end
+	end
 
 	-- 🛡️ SECURITY: IDEMPOTENCY CHECK (Prevents Double Rewards)
-	-- We create a unique key for this specific transaction.
-	local purchaseKey = receiptInfo.PlayerId .. "_" .. receiptInfo.PurchaseId
+	-- We use the BUYER'S ID for the key because they are the one paying.
+	local purchaseKey = buyerId .. "_" .. receiptInfo.PurchaseId
 	local success, alreadyProcessed = pcall(function()
 		return PurchaseHistory:GetAsync(purchaseKey)
 	end)
@@ -73,17 +89,18 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
-	-- Proceed with Purchase Logic
+	-- Proceed with Purchase Logic (Applying to targetPlayer)
 	local pid = receiptInfo.ProductId
-	local purchaseSuccess = false -- Track if we successfully gave the item
+	local purchaseSuccess = false 
 
-	print("🛒 Processing Purchase for ProductID: " .. pid)
+	print("🛒 Processing Purchase for ProductID: " .. pid .. " | Receiver: " .. targetPlayer.Name)
 
 	-- ====================================================
 	-- 1️⃣ PRODUCT: TABLET 2X EARNINGS
 	-- ====================================================
 	if pid == TABLET_2X_ID then
-		local myPlotName = player:GetAttribute("OccupiedPlot")
+		-- Apply to TARGET PLAYER'S Plot
+		local myPlotName = targetPlayer:GetAttribute("OccupiedPlot")
 		local plot = myPlotName and TycoonFolder:FindFirstChild(myPlotName)
 
 		if plot and plot:FindFirstChild("PendingEarnings") then 
@@ -92,7 +109,7 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 
 			if amount > 0 then
 				pendingVal.Value = 0
-				local ls = player:FindFirstChild("leaderstats")
+				local ls = targetPlayer:FindFirstChild("leaderstats")
 				if ls and ls:FindFirstChild("Cash") then
 					ls.Cash.Value += (amount * 2)
 				end
@@ -105,14 +122,15 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		-- ====================================================
 	elseif pid == SHOP_REROLL_ID then
 		if ShopRerollFunc then
-			ShopRerollFunc:Invoke(player) 
+			-- Invoke for TARGET PLAYER
+			ShopRerollFunc:Invoke(targetPlayer) 
 			purchaseSuccess = true
 		else
 			warn("⚠️ Critical: ShopRerollFunction missing!")
 		end
 
 		-- ====================================================
-		-- 3️⃣ PRODUCT: BASE SKINS (Gold Upgrade)
+		-- 3️⃣ PRODUCT: BASE SKINS (Silver/Gold/Diamond/Rainbow)
 		-- ====================================================
 	elseif BaseSkinStats then
 		local skinFound = nil
@@ -124,19 +142,20 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		end
 
 		if skinFound then
-			-- Grant Ownership
-			local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
+			-- Grant Ownership to TARGET PLAYER
+			local ownedRaw = targetPlayer:GetAttribute("OwnedBaseSkins") or "[]"
 			local ownedTable = {}
 			local decodeSuccess, _ = pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
 			if not decodeSuccess then ownedTable = {} end
 
 			if not table.find(ownedTable, skinFound) then
 				table.insert(ownedTable, skinFound)
-				player:SetAttribute("OwnedBaseSkins", HttpService:JSONEncode(ownedTable))
+				targetPlayer:SetAttribute("OwnedBaseSkins", HttpService:JSONEncode(ownedTable))
 			end
 
-			-- Auto Equip
-			player:SetAttribute("EquippedSkin", skinFound)
+			-- Optional: Auto-Equip only if buying for self? 
+			-- Or Auto-Equip for friend too? Let's Auto-Equip for friend to show it off immediately.
+			targetPlayer:SetAttribute("EquippedSkin", skinFound)
 			purchaseSuccess = true
 		end
 
@@ -152,19 +171,19 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			local newTool = tool:Clone()
 			newTool:SetAttribute("IssuedByServer", true)
 			newTool:SetAttribute("IssuedAt", os.time())
-			newTool:SetAttribute("ToolId", tool.Name) -- Critical for Anti-Cheat
+			newTool:SetAttribute("ToolId", tool.Name) 
 
-			-- Safe Backpack Check
-			local backpack = player:FindFirstChild("Backpack")
+			-- Give to TARGET PLAYER'S Backpack
+			local backpack = targetPlayer:FindFirstChild("Backpack")
 			if backpack then
 				newTool.Parent = backpack
 			else
-				warn("⚠️ Player dead/respawning. Item added to StarterGear only.")
+				warn("⚠️ Receiver dead/respawning. Item added to StarterGear only.")
 			end
 
-			-- StarterGear
+			-- StarterGear (Persistence)
 			local gearClone = newTool:Clone()
-			gearClone.Parent = player:WaitForChild("StarterGear")
+			gearClone.Parent = targetPlayer:WaitForChild("StarterGear")
 
 			purchaseSuccess = true
 		else
@@ -182,7 +201,12 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		pcall(function()
 			PurchaseHistory:SetAsync(purchaseKey, true)
 		end)
-		print("✅ Purchase Successful & Saved: " .. pid)
+
+		-- Optional: Send a visual notification or sound to the receiver if it was a gift
+		if isGift then
+			print("✅ Gift successfully delivered to " .. targetPlayer.Name)
+		end
+
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	else
 		-- If logic failed (e.g., missing plot), try again later
