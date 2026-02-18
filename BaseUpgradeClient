@@ -1,4 +1,4 @@
--- [[ LOCAL SCRIPT: BaseUpgradeClient (FINAL - WITH GIFTING) ]]
+-- [[ LOCAL SCRIPT: BaseUpgradeClient (FINAL - WITH GIFTING FIX) ]]
 -- Purpose: Shop UI, Feedback, Sounds, EQUIP/UNEQUIP, and GIFTING connection.
 -- Location: StarterPlayerScripts
 
@@ -323,7 +323,7 @@ local function ConnectCard(cardFrame, skinName)
 		else btnUnequip.MouseButton1Click:Connect(onUnequip) end
 	end
 
-	-- 5. 🎁 GIFT BUTTON (NEW INTEGRATION)
+	-- 5. 🎁 GIFT BUTTON (NEW INTEGRATION - WITH SAFETY CHECK)
 	local btnGift = buyFrame:FindFirstChild("GiftButton")
 	if btnGift then
 		btnGift.MouseButton1Click:Connect(function()
@@ -332,10 +332,20 @@ local function ConnectCard(cardFrame, skinName)
 
 			if skinData and skinData.ProductId then
 				-- B. Call the Global Gift Function (defined in GiftUIController)
+				-- 🛡️ RACE CONDITION FIX: Wait if not ready
+				if not _G.OpenGiftMenu then
+					warn("⚠️ Gift Controller hasn't loaded yet. Retrying...")
+					local attempts = 0
+					while not _G.OpenGiftMenu and attempts < 10 do
+						task.wait(0.2)
+						attempts += 1
+					end
+				end
+
 				if _G.OpenGiftMenu then
 					_G.OpenGiftMenu(skinData.ProductId)
 				else
-					warn("⚠️ Gift Controller hasn't loaded yet. Wait a moment.")
+					warn("❌ CRITICAL: Gift Menu function (_G.OpenGiftMenu) is missing. Is GiftUIController running?")
 				end
 			else
 				warn("❌ No Product ID found for " .. skinName)
