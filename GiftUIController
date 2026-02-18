@@ -1,26 +1,86 @@
--- [[ LOCAL SCRIPT: GiftUIController (STATIC SLOT VERSION) ]]
--- Purpose: Handles 5 Static Slots, Gifting Logic, and Indicator Feedback.
+-- [[ LOCAL SCRIPT: GiftUIController (MAX LEVEL) ]]
+-- Purpose: The "Brain" of the Gifting System. Handles UI, Animation, Logic, and Feedback.
 -- Location: StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
 
--- 📡 REMOTES
-local Remotes = ReplicatedStorage:WaitForChild("GiftRemotes")
+-- 📡 REMOTES (Wait slightly to prevent "Silent Freeze" if loading slowly)
+local Remotes = ReplicatedStorage:WaitForChild("GiftRemotes", 10)
+if not Remotes then 
+	warn("⚠️ GiftUIController: 'GiftRemotes' folder missing in ReplicatedStorage!") 
+	return 
+end
 local SetIntentEvent = Remotes:WaitForChild("SetGiftIntent")
 
--- ⚙️ STATE
+-- ⚙️ CONFIGURATION
+local UI_NAME = "UniversalGiftUI"
+local TWEEN_INFO = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local HOVER_COLOR = Color3.fromRGB(200, 200, 200) -- Dim color
+local NORMAL_COLOR = Color3.fromRGB(255, 255, 255) -- Normal color
+
+-- 🔊 SOUNDS (Create on the fly for reliability)
+local Audio = {
+	Open = Instance.new("Sound", SoundService),
+	Click = Instance.new("Sound", SoundService),
+	Success = Instance.new("Sound", SoundService),
+	Error = Instance.new("Sound", SoundService)
+}
+Audio.Open.SoundId = "rbxassetid://6895079853" -- Pop
+Audio.Click.SoundId = "rbxassetid://4210586953" -- Click
+Audio.Success.SoundId = "rbxassetid://2619623062" -- Chime
+Audio.Error.SoundId = "rbxassetid://1526487928" -- Error buzz
+
+-- 💾 STATE
 local currentProductId = nil
-local currentTargetName = "" -- Stores who we are currently trying to gift
+local currentTargetName = "" 
 local mainFrame = nil
+local screenGui = nil
 
 -- ============================================================================
--- 🎨 ANIMATIONS & VISUALS
+-- 🎨 ANIMATION ENGINE
+-- ============================================================================
+local function AnimateOpen()
+	if not mainFrame then return end
+	screenGui.Enabled = true
+
+	-- Start small and transparent
+	mainFrame.UIScale.Scale = 0.8
+	mainFrame.CanvasGroup.GroupTransparency = 1 
+
+	-- Tween to normal
+	TweenService:Create(mainFrame.UIScale, TWEEN_INFO, {Scale = 1}):Play()
+	TweenService:Create(mainFrame.CanvasGroup, TWEEN_INFO, {GroupTransparency = 0}):Play()
+	Audio.Open:Play()
+end
+
+local function AnimateClose()
+	if not mainFrame then return end
+
+	-- Tween out
+	local t1 = TweenService:Create(mainFrame.UIScale, TWEEN_INFO, {Scale = 0.8})
+	local t2 = TweenService:Create(mainFrame.CanvasGroup, TWEEN_INFO, {GroupTransparency = 1})
+	t1:Play()
+	t2:Play()
+
+	t1.Completed:Connect(function()
+		screenGui.Enabled = false
+	end)
+end
+
+local function AnimateButton(btn, isHovering)
+	local target = isHovering and HOVER_COLOR or NORMAL_COLOR
+	TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = target}):Play()
+end
+
+-- ============================================================================
+-- 💡 INDICATOR LOGIC
 -- ============================================================================
 local function SetIndicator(msg, color)
 	if mainFrame then
@@ -29,6 +89,11 @@ local function SetIndicator(msg, color)
 			indicator.Text = msg
 			indicator.TextColor3 = color
 			indicator.Visible = true
+
+			-- Gentle pulse effect
+			local originalSize = indicator.TextSize
+			indicator.TextSize = originalSize * 1.2
+			TweenService:Create(indicator, TweenInfo.new(0.5, Enum.EasingStyle.Bounce), {TextSize = originalSize}):Play()
 		end
 	end
 end
@@ -37,15 +102,11 @@ local function ResetIndicator()
 	if mainFrame then
 		local indicator = mainFrame:FindFirstChild("Indicator")
 		if indicator then
-			indicator.Text = "" -- Clear text
-			indicator.Visible = false
+			indicator.Text = "Select a player to gift"
+			indicator.TextColor3 = Color3.fromRGB(255, 255, 255)
+			indicator.Visible = true
 		end
 	end
-end
-
-local function AnimateHover(btn, isHovering)
-	local targetColor = isHovering and Color3.fromRGB(200, 200, 200) or Color3.fromRGB(255, 255, 255)
-	TweenService:Create(btn, TweenInfo.new(0.2), {ImageColor3 = targetColor}):Play()
 end
 
 -- ============================================================================
@@ -84,21 +145,26 @@ local function UpdateSlots()
 					avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. target.UserId .. "&w=150&h=150"
 				end
 
-				-- Connect Button
+				-- Connect Button (Disconnecting old events via cloning is safer for repeated use)
 				if giftBtn then
-					-- Clear old connections (Simple overwrite via variable capability is tricky in Lua, 
-					-- so we clone the button to wipe events or use a debounce. 
-					-- For safety here, we assume the menu re-opens fresh.)
+					-- Hack: Clone button to wipe old connections, then replace
+					local newBtn = giftBtn:Clone()
+					newBtn.Parent = slotFrame
+					giftBtn:Destroy()
+					giftBtn = newBtn
 
 					-- Hover
-					giftBtn.MouseEnter:Connect(function() AnimateHover(giftBtn, true) end)
-					giftBtn.MouseLeave:Connect(function() AnimateHover(giftBtn, false) end)
+					giftBtn.MouseEnter:Connect(function() AnimateButton(giftBtn, true) end)
+					giftBtn.MouseLeave:Connect(function() AnimateButton(giftBtn, false) end)
 
 					-- CLICK TO GIFT
 					giftBtn.MouseButton1Click:Connect(function()
 						if currentProductId then
+							Audio.Click:Play()
+
 							-- 1. Save Target Name for the Indicator
 							currentTargetName = target.Name
+							SetIndicator("Processing...", Color3.fromRGB(255, 255, 100)) -- Yellow
 
 							-- 2. Tell Server Intent
 							SetIntentEvent:FireServer(target.UserId)
@@ -117,49 +183,65 @@ local function UpdateSlots()
 end
 
 -- ============================================================================
--- 🧾 PURCHASE FEEDBACK (INDICATOR LOGIC)
+-- 🧾 PURCHASE FEEDBACK
 -- ============================================================================
 MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
 	if userId ~= player.UserId then return end
-	if not mainFrame or not mainFrame.Visible then return end
 
-	-- Check if this was the item we were gifting
+	-- Only react if the UI is open or was just used
 	if productId == currentProductId then
 		if isPurchased then
 			-- ✅ SUCCESS
-			SetIndicator("Gift successfully sent to " .. currentTargetName, Color3.fromRGB(85, 255, 127)) -- Green
+			SetIndicator("Gift sent to " .. currentTargetName .. "!", Color3.fromRGB(85, 255, 127)) -- Green
+			Audio.Success:Play()
+
+			-- Auto-close after 2 seconds
+			task.delay(2.5, function()
+				if screenGui.Enabled then AnimateClose() end
+			end)
 		else
-			-- ❌ FAILED / CANCELLED
-			SetIndicator("Purchase failed", Color3.fromRGB(255, 85, 85)) -- Red
+			-- ❌ CANCELLED / FAILED
+			SetIndicator("Purchase Cancelled", Color3.fromRGB(255, 85, 85)) -- Red
+			Audio.Error:Play()
 		end
 	end
 end)
 
 -- ============================================================================
--- 🚀 PUBLIC API (OPEN MENU)
+-- 🚀 INIT & PUBLIC API
 -- ============================================================================
-local GiftSystem = {}
+local function Init()
+	screenGui = PlayerGui:WaitForChild(UI_NAME)
+	mainFrame = screenGui:WaitForChild("MainFrame")
 
-function GiftSystem.Open(productId)
-	local gui = PlayerGui:WaitForChild("UniversalGiftUI")
-	mainFrame = gui:WaitForChild("MainFrame")
-	currentProductId = productId
-
-	ResetIndicator() -- Clear old messages
-	UpdateSlots()    -- Refresh list of players
+	-- Ensure components for animation exist
+	if not mainFrame:FindFirstChild("UIScale") then
+		local s = Instance.new("UIScale")
+		s.Parent = mainFrame
+	end
+	if not mainFrame:FindFirstChild("CanvasGroup") and mainFrame:IsA("Frame") then
+		-- Optional: Convert to CanvasGroup for opacity fade, else standard frame works
+		-- If it is a standard Frame, GroupTransparency won't work, so we skip that part of animation
+	end
 
 	-- Setup Exit Button
 	local exitBtn = mainFrame:FindFirstChild("ExitButton")
 	if exitBtn then
 		exitBtn.MouseButton1Click:Connect(function()
-			gui.Enabled = false
+			Audio.Click:Play()
+			AnimateClose()
 		end)
 	end
-
-	gui.Enabled = true
 end
 
--- Expose to Global so your Shop Scripts can find it
-_G.OpenGiftMenu = GiftSystem.Open
+-- Global Function called by your Shops
+_G.OpenGiftMenu = function(productId)
+	if not mainFrame then Init() end
 
-return GiftSystem
+	currentProductId = productId
+	ResetIndicator()
+	UpdateSlots()
+	AnimateOpen()
+end
+
+return {}
