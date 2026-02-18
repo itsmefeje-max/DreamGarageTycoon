@@ -1,0 +1,37 @@
+-- [[ SERVER SCRIPT: GiftIntentHandler ]]
+-- Purpose: Remembers who a player wants to gift.
+-- Location: ServerScriptService
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local Remotes = ReplicatedStorage:WaitForChild("GiftRemotes")
+local SetIntentEvent = Remotes:WaitForChild("SetGiftIntent")
+
+-- 🗄️ STORAGE: { [BuyerUserId] = ReceiverUserId }
+local pendingGifts = {}
+
+-- 📡 LISTEN FOR INTENT
+SetIntentEvent.OnServerEvent:Connect(function(buyer, receiverUserId)
+	-- Basic Validation
+	if typeof(receiverUserId) == "number" then
+		print("🎁 Gift Intent Set: " .. buyer.Name .. " wants to gift UserID: " .. receiverUserId)
+		pendingGifts[buyer.UserId] = receiverUserId
+	end
+end)
+
+-- 🧹 CLEANUP (If player leaves, clear memory)
+Players.PlayerRemoving:Connect(function(player)
+	pendingGifts[player.UserId] = nil
+end)
+
+-- 🔒 EXPOSE DATA TO RECEIPT ROUTER
+-- We use a Module pattern or _G so ReceiptRouter can read this table
+_G.GetGiftReceiver = function(buyerUserId)
+	local receiverId = pendingGifts[buyerUserId]
+
+	-- Important: Clear the intent immediately after reading so next purchase isn't accidental
+	pendingGifts[buyerUserId] = nil 
+
+	return receiverId
+end
