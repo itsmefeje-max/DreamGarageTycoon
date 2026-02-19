@@ -6,7 +6,7 @@
 -- Networking: BaseUpgradeTransaction (Client -> Server)
 -- Security: UI visual logic. Validations happen on the server.
 -- Performance: Preloads sounds, caches UI states.
--- Notes: Contains aggressive debugging for the GiftButton click failure.
+-- Notes: GiftButton now routes through Kit.Tween to inherit the dim hover effect.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -80,7 +80,7 @@ local function ShowFeedback(message, isSuccess)
 	local frame = gui:FindFirstChild(FRAME_NAME)
 	if not frame then return end
 
-	local feedbackLbl = frame:FindFirstChild(FEEDBACK_LBL_NAME, true) -- Recursive search
+	local feedbackLbl = frame:FindFirstChild(FEEDBACK_LBL_NAME, true)
 	if not feedbackLbl then return end 
 
 	if isSuccess then
@@ -233,7 +233,6 @@ local function UpdateCardVisuals(cardFrame, skinName)
 	local buyFrame = cardFrame:FindFirstChild("BuyFrame", true)
 	if not buyFrame then return end
 
-	-- 🛡️ RECURSIVE SEARCH: Fixes issues where buttons are inside sub-frames
 	local btnCash = buyFrame:FindFirstChild("BuyForCash", true)
 	local btnRobux = buyFrame:FindFirstChild("BuyForRobux", true)
 	local obtainedIndicator = buyFrame:FindFirstChild("ObtainedIndicator", true)
@@ -285,7 +284,6 @@ local function ConnectCard(cardFrame, skinName)
 		return 
 	end
 
-	-- 🛡️ RECURSIVE SEARCH FOR ALL BUTTONS
 	local btnCash = resolveGuiButton(buyFrame:FindFirstChild("BuyForCash", true))
 	local btnRobux = resolveGuiButton(buyFrame:FindFirstChild("BuyForRobux", true))
 	local btnEquip = resolveGuiButton(buyFrame:FindFirstChild("Equip", true))
@@ -338,18 +336,18 @@ local function ConnectCard(cardFrame, skinName)
 		else btnUnequip.MouseButton1Click:Connect(onUnequip) end
 	end
 
-	-- 5. 🎁 GIFT BUTTON (WITH AGGRESSIVE DEBUGGING)
+	-- 5. 🎁 GIFT BUTTON (NOW ROUTES THROUGH KIT FOR DIM EFFECT)
 	if btnGift then
 		print("✅ Found GiftButton for " .. skinName .. "! Class type: " .. btnGift.ClassName)
-		
-		btnGift.Activated:Connect(function()
+
+		local function onGiftClicked()
 			print("🖱️ CLICK REGISTERED ON: " .. skinName .. " Gift Button!")
-			
+
 			local skinData = BaseSkinStats[skinName]
 
 			if skinData and skinData.ProductId then
 				print("📦 Product ID found: " .. tostring(skinData.ProductId))
-				
+
 				if not _G.OpenGiftMenu then
 					warn("⚠️ Gift Controller hasn't loaded yet. Retrying...")
 					local attempts = 0
@@ -368,7 +366,14 @@ local function ConnectCard(cardFrame, skinName)
 			else
 				warn("❌ No Product ID found for " .. skinName)
 			end
-		end)
+		end
+
+		-- This replaces the old raw Activated connection to give it the hover tween
+		if Kit and Kit.Tween then 
+			Kit.Tween:SetupButton(btnGift, onGiftClicked)
+		else 
+			btnGift.MouseButton1Click:Connect(onGiftClicked) 
+		end
 	else
 		local nodeClass = giftNode and giftNode.ClassName or "nil"
 		warn("❌ btnGift NOT FOUND for " .. skinName .. " (GiftButton node class: " .. nodeClass .. ")")
@@ -406,7 +411,7 @@ local function setVisible(isOpen)
 	if isOpen then
 		toggleOtherGuis(true)
 		toggleNamedGuiObjects(true, "FriendBoost") 
-		setBlur(true)                              
+		setBlur(true)                               
 		setMovement(false)                         
 		SetupShop()
 		gui.Enabled = true
