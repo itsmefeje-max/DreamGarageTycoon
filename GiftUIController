@@ -5,8 +5,8 @@
 -- Public API: _G.OpenGiftMenu (Consider refactoring to a ModuleScript export)
 -- Networking: Fires 'SetGiftIntent' to server to map buyer to receiver.
 -- Security: Client authority is zero. Server must validate intent, verify target is in-game, and rate-limit remote calls.
--- Performance: Utilizes event connection pooling instead of UI cloning to avoid layout recalculations.
--- Notes: Implemented state-guards to prevent permanent movement locking and GUI hiding if opened twice.
+-- Performance: Utilizes event connection pooling. Pre-initializes on load to prevent first-click delay.
+-- Notes: Implemented state-guards, auto-hide on load, and an animated empty-server indicator that hides the normal indicator.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -56,15 +56,17 @@ end
 -- 💾 STATE
 local currentProductId = nil
 local currentTargetName = ""
-local isMenuOpen = false -- STATE GUARD
+local isMenuOpen = false 
 local isInitialized = false
+local isInitializing = false
 
 local screenGui = nil
 local mainFrame = nil
 local detector = nil
+local emptyIndicator = nil 
 
 local hiddenGuis = {}
-local btnConnections = {} -- Event pool to replace UI cloning
+local btnConnections = {} 
 
 local normalFov = nil
 local openFov = nil
@@ -105,7 +107,6 @@ local function setMovementLocked(isLocked)
 	if not humanoid then return end
 
 	if isLocked then
-		-- Only save if we haven't already
 		if savedWalkSpeed == nil then
 			savedWalkSpeed = humanoid.WalkSpeed
 			savedJumpPower = humanoid.JumpPower
@@ -126,9 +127,9 @@ end
 -- ============================================================================
 local function tweenFov(toFov)
 	if not USE_CAMERA_FOV or not toFov then return end
-	local currentCamera = Workspace.CurrentCamera -- Dynamically fetch in case of reset
+	local currentCamera = Workspace.CurrentCamera 
 	if not currentCamera then return end
-	
+
 	TweenService:Create(currentCamera, CAM_TWEEN_INFO, {FieldOfView = toFov}):Play()
 end
 
@@ -169,12 +170,71 @@ local function SetIndicator(msg, color)
 end
 
 -- ============================================================================
+-- ✨ EMPTY STATE VISUALS
+-- ============================================================================
+local EmptyFX = nil
+local function ensureEmptyFX(label)
+	if not label or EmptyFX then return end
+	if not label:IsA("TextLabel") then return end
+
+	local stroke = label:FindFirstChild("__EmptyStroke") or Instance.new("UIStroke")
+	stroke.Name = "__EmptyStroke"
+	stroke.Thickness = 3
+	stroke.Color = Color3.new(0, 0, 0)
+	stroke.LineJoinMode = Enum.LineJoinMode.Round
+	stroke.Parent = label
+
+	local grad = label:FindFirstChild("__EmptyGrad") or Instance.new("UIGradient")
+	grad.Name = "__EmptyGrad"
+	grad.Rotation = -20
+	grad.Color = ColorSequence.new(Color3.fromRGB(255, 240, 165), Color3.fromRGB(255, 175, 55))
+	grad.Parent = label
+
+	local shine = label:FindFirstChild("__EmptyShine") or Instance.new("Frame")
+	shine.Name = "__EmptyShine"
+	shine.BackgroundTransparency = 1
+	shine.Size = UDim2.new(1, 0, 1, 0)
+	shine.ZIndex = label.ZIndex + 2
+	shine.Parent = label
+
+	local shineGrad = shine:FindFirstChild("__EmptyShineGrad") or Instance.new("UIGradient")
+	shineGrad.Name = "__EmptyShineGrad"
+	shineGrad.Rotation = -35
+	shineGrad.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(1, 1, 1))
+	shineGrad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0.00, 1.00),
+		NumberSequenceKeypoint.new(0.45, 1.00),
+		NumberSequenceKeypoint.new(0.50, 0.25),
+		NumberSequenceKeypoint.new(0.55, 1.00),
+		NumberSequenceKeypoint.new(1.00, 1.00),
+	})
+	shineGrad.Offset = Vector2.new(-1.2, 0)
+	shineGrad.Parent = shine
+
+	local shineTween = TweenService:Create(
+		shineGrad,
+		TweenInfo.new(2.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false),
+		{ Offset = Vector2.new(1.2, 0) }
+	)
+	shineTween:Play()
+
+	local shimmerTween = TweenService:Create(
+		grad,
+		TweenInfo.new(2.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Offset = Vector2.new(0.35, 0) }
+	)
+	shimmerTween:Play()
+
+	EmptyFX = { stroke = stroke, grad = grad, shine = shine }
+end
+
+-- ============================================================================
 -- 🧠 FOCUS MODE
 -- ============================================================================
 local function setFocusMode(isFocused)
 	if not screenGui or not mainFrame then return end
-	if isMenuOpen == isFocused then return end -- Strict state guard
-	
+	if isMenuOpen == isFocused then return end 
+
 	isMenuOpen = isFocused
 	detector.Visible = isFocused
 
@@ -194,7 +254,7 @@ local function setFocusMode(isFocused)
 end
 
 -- ============================================================================
--- 🔄 UI REFRESH (EVENT POOLING INSTEAD OF CLONING)
+-- 🔄 UI REFRESH
 -- ============================================================================
 local function UpdateSlots()
 	if not mainFrame then return end
@@ -203,6 +263,29 @@ local function UpdateSlots()
 	for _, p in pairs(Players:GetPlayers()) do
 		if p ~= player then
 			table.insert(validPlayers, p)
+		end
+	end
+
+	local standardIndicator = mainFrame:FindFirstChild("Indicator")
+
+	-- Check if server is empty
+	if #validPlayers == 0 then
+		if emptyIndicator then
+			ensureEmptyFX(emptyIndicator)
+			emptyIndicator.Text = "No One To Gift In THIS SERVER :("
+			emptyIndicator.Visible = true
+		end
+		-- 🛡️ Hide the standard indicator if no players exist
+		if standardIndicator then
+			standardIndicator.Visible = false
+		end
+	else
+		if emptyIndicator then
+			emptyIndicator.Visible = false
+		end
+		-- 🛡️ Ensure standard indicator is visible if players exist
+		if standardIndicator then
+			standardIndicator.Visible = true
 		end
 	end
 
@@ -224,8 +307,7 @@ local function UpdateSlots()
 
 				if giftBtn then
 					addHover(giftBtn)
-					
-					-- Safely pool connections instead of cloning UI
+
 					if btnConnections[i] then
 						btnConnections[i]:Disconnect()
 						btnConnections[i] = nil
@@ -233,8 +315,7 @@ local function UpdateSlots()
 
 					btnConnections[i] = giftBtn.MouseButton1Click:Connect(function()
 						if not currentProductId or giftBtn:GetAttribute("Cooldown") then return end
-						
-						-- Client debounce to prevent remote spam
+
 						giftBtn:SetAttribute("Cooldown", true)
 						task.delay(1, function() giftBtn:SetAttribute("Cooldown", false) end)
 
@@ -285,17 +366,25 @@ end)
 -- 🚀 INIT
 -- ============================================================================
 local function Init()
-	if isInitialized then return end
+	if isInitialized or isInitializing then return end
+	isInitializing = true
 
-	screenGui = PlayerGui:WaitForChild(UI_NAME, 5)
+	screenGui = PlayerGui:WaitForChild(UI_NAME, 10)
 	if not screenGui then
 		warn("❌ GiftUIController: Could not find " .. UI_NAME)
+		isInitializing = false
 		return
 	end
-	mainFrame = screenGui:WaitForChild("MainFrame")
 
+	mainFrame = screenGui:WaitForChild("MainFrame", 5)
+
+	if mainFrame then
+		emptyIndicator = mainFrame:FindFirstChild("EmptyServerIndicator")
+	end
+
+	-- 🛡️ STRICT HIDE: Overrides any properties set in Studio immediately on load
 	screenGui.Enabled = false
-	mainFrame.Visible = false
+	if mainFrame then mainFrame.Visible = false end
 
 	local currentCamera = Workspace.CurrentCamera
 	normalFov = (currentCamera and currentCamera.FieldOfView) or 70
@@ -314,25 +403,32 @@ local function Init()
 	local mfZ = 10
 	pcall(function() mfZ = mainFrame.ZIndex end)
 	pcall(function() detector.ZIndex = math.max(0, mfZ - 1) end)
-	
+
 	detector.Visible = false
 	detector.MouseButton1Click:Connect(PerformClose)
 
-	local exitBtn = mainFrame:FindFirstChild("ExitButton")
+	local exitBtn = mainFrame and mainFrame:FindFirstChild("ExitButton")
 	if exitBtn then
 		addHover(exitBtn)
 		exitBtn.MouseButton1Click:Connect(PerformClose)
 	end
 
 	isInitialized = true
+	isInitializing = false
 end
 
 -- ============================================================================
 -- 🌍 PUBLIC API
 -- ============================================================================
 _G.OpenGiftMenu = function(productId)
-	Init()
-	if not isInitialized then return end
+	if not isInitialized then
+		Init()
+	end
+
+	if not isInitialized then 
+		warn("❌ GiftUIController failed to initialize.")
+		return 
+	end
 
 	currentProductId = productId
 	SetIndicator("Select a player to gift", Color3.fromRGB(255, 255, 255))
@@ -341,5 +437,8 @@ _G.OpenGiftMenu = function(productId)
 	playSfx(SFX.Open, 0.5, screenGui)
 	setFocusMode(true)
 end
+
+-- 🛡️ AUTO-RUN ON START: Forces the UI to hide the moment the player loads in
+task.spawn(Init)
 
 return {}
