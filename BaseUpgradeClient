@@ -218,6 +218,17 @@ end
 -- 🛍️ CARD LOGIC (BUY / EQUIP / UNEQUIP / GIFT)
 -- ============================================================================
 
+local function resolveGuiButton(target)
+	if not target then return nil end
+	if target:IsA("GuiButton") then return target end
+	for _, descendant in ipairs(target:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			return descendant
+		end
+	end
+	return nil
+end
+
 local function UpdateCardVisuals(cardFrame, skinName)
 	local buyFrame = cardFrame:FindFirstChild("BuyFrame", true)
 	if not buyFrame then return end
@@ -275,11 +286,12 @@ local function ConnectCard(cardFrame, skinName)
 	end
 
 	-- 🛡️ RECURSIVE SEARCH FOR ALL BUTTONS
-	local btnCash = buyFrame:FindFirstChild("BuyForCash", true)
-	local btnRobux = buyFrame:FindFirstChild("BuyForRobux", true)
-	local btnEquip = buyFrame:FindFirstChild("Equip", true)
-	local btnUnequip = buyFrame:FindFirstChild("Unequip", true)
-	local btnGift = buyFrame:FindFirstChild("GiftButton", true)
+	local btnCash = resolveGuiButton(buyFrame:FindFirstChild("BuyForCash", true))
+	local btnRobux = resolveGuiButton(buyFrame:FindFirstChild("BuyForRobux", true))
+	local btnEquip = resolveGuiButton(buyFrame:FindFirstChild("Equip", true))
+	local btnUnequip = resolveGuiButton(buyFrame:FindFirstChild("Unequip", true))
+	local giftNode = buyFrame:FindFirstChild("GiftButton", true)
+	local btnGift = resolveGuiButton(giftNode)
 
 	-- 1. BUY CASH
 	if btnCash then
@@ -330,7 +342,7 @@ local function ConnectCard(cardFrame, skinName)
 	if btnGift then
 		print("✅ Found GiftButton for " .. skinName .. "! Class type: " .. btnGift.ClassName)
 		
-		btnGift.MouseButton1Click:Connect(function()
+		btnGift.Activated:Connect(function()
 			print("🖱️ CLICK REGISTERED ON: " .. skinName .. " Gift Button!")
 			
 			local skinData = BaseSkinStats[skinName]
@@ -358,7 +370,8 @@ local function ConnectCard(cardFrame, skinName)
 			end
 		end)
 	else
-		warn("❌ btnGift NOT FOUND for " .. skinName)
+		local nodeClass = giftNode and giftNode.ClassName or "nil"
+		warn("❌ btnGift NOT FOUND for " .. skinName .. " (GiftButton node class: " .. nodeClass .. ")")
 	end
 end
 
