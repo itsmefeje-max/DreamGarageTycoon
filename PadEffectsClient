@@ -6,7 +6,7 @@
 -- Networking: Receives PadUnlockEvent (Server -> Client)
 -- Security: Purely visual. Trusts the server's event trigger.
 -- Performance: Reuses UI elements, utilizes task.spawn for particle loop, Thread-safe notifications.
--- Notes: Dynamically intercepts and rewrites "Base" strings to say "pads".
+-- Notes: Dynamically intercepts "Base" strings. Added Streak Multiplier (x2, x3) for consecutive rapid events.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -49,8 +49,12 @@ padLabel.Visible = true
 local initialStroke = padLabel:FindFirstChildOfClass("UIStroke")
 if initialStroke then initialStroke.Transparency = 1 end
 
--- 🛡️ STATE TRACKING
+-- 🛡️ STATE TRACKING (For the Multiplier Streak)
 local notificationId = 0 
+local lastNotifSuccess = nil
+local lastNotifData = nil
+local notifStreak = 0
+local notifExpiryTime = 0
 
 -- ============================================================================
 -- 2. ANIMATION FUNCTIONS
@@ -115,38 +119,57 @@ end
 local function playNotification(isSuccess, data)
 	notificationId += 1
 	local currentId = notificationId 
+	local currentTime = os.clock()
+
+	-- 🧮 1. STREAK CALCULATOR
+	if isSuccess == lastNotifSuccess and data == lastNotifData and currentTime < notifExpiryTime then
+		notifStreak += 1 -- Same event while UI is still active!
+	else
+		lastNotifSuccess = isSuccess
+		lastNotifData = data
+		notifStreak = 1 -- Reset back to 1
+	end
+
+	-- Push the expiration timer forward since they clicked again
+	notifExpiryTime = currentTime + NOTIFICATION_DURATION
 
 	local uiStroke = padLabel:FindFirstChildOfClass("UIStroke")
 
-	-- 1. Dynamic Text Formatting
+	-- 📝 2. BASE TEXT FORMATTING
+	local baseText = ""
 	if isSuccess then
 		padLabel.TextColor3 = COLOR_SUCCESS
 		local isNumber = tonumber(data)
 
 		if isNumber then
-			-- It's a regular Tycoon Pad (e.g., 2)
-			padLabel.Text = "Purchase Completed! You now own Pad " .. tostring(data)
+			baseText = "Purchase Completed! You now own Pad " .. tostring(data)
 		else
-			-- 🛑 FIX: Automatically strips the word "Base" if the server sent it, and formats exactly as requested.
 			local rawString = tostring(data)
 			local cleanName = string.gsub(rawString, " Base", "") 
-			padLabel.Text = "You finally own " .. cleanName .. " pads!"
+			baseText = "You finally own " .. cleanName .. " pads!"
 		end
 	else
 		padLabel.TextColor3 = COLOR_FAIL
 		local formattedMoney = tostring(data):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
-		padLabel.Text = "Insufficient Funds! You need $" .. formattedMoney .. " more."
+		baseText = "Insufficient Funds! You need $" .. formattedMoney .. " more."
 	end
 
-	-- 2. Fade In
+	-- ➕ 3. APPEND MULTIPLIER (If applicable)
+	if notifStreak > 1 then
+		padLabel.Text = baseText .. " (x" .. notifStreak .. ")"
+	else
+		padLabel.Text = baseText
+	end
+
+	-- 🎬 4. FADE IN TWEEN
 	local tInfoIn = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 	TweenService:Create(padLabel, tInfoIn, {TextTransparency = 0}):Play()
 	if uiStroke then TweenService:Create(uiStroke, tInfoIn, {Transparency = 0}):Play() end
 
-	-- 3. Wait safely
+	-- ⏳ 5. WAIT SAFELY
 	task.wait(NOTIFICATION_DURATION)
 
-	-- 4. Only fade out if another notification hasn't started!
+	-- 👻 6. FADE OUT (Only if it hasn't been overwritten by a new click)
 	if notificationId == currentId then
 		local tInfoOut = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 		TweenService:Create(padLabel, tInfoOut, {TextTransparency = 1}):Play()
