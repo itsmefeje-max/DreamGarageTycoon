@@ -1,6 +1,12 @@
--- [[ SERVER SCRIPT: PlacedCarAnimator (No Spin) ]]
--- -- Indicating what the script is for: Animates ALL cars on ALL pads with a gentle UP/DOWN float only.
--- LOCATION: ServerScriptService
+-- Purpose: Animates ALL placed cars on ALL pads with a gentle UP/DOWN float, rendered purely on the client to prevent server lag.
+-- Runs on: Client
+-- Location: StarterPlayerScripts
+-- Dependencies: RunService, Workspace
+-- Public API: None
+-- Networking: None
+-- Security: Client-sided visuals only. Prevents exploiters from weaponizing server movement.
+-- Performance: Extremely fast. Eliminates O(N) physics replication per frame from the server.
+-- Notes: Must be placed in StarterPlayerScripts as a LocalScript. Delete the old Server script.
 
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -20,11 +26,13 @@ local function trackCar(car)
 	if not car:IsA("Model") then return end
 	if activeCars[car] then return end -- Already tracked
 
-	-- Wait 0.2s for PadController to finish positioning the car
+	-- Wait 0.2s for PadController (Server) to finish positioning the car
 	-- This ensures we capture the CORRECT position on the pad
 	task.wait(0.2)
 
-	activeCars[car] = car:GetPivot()
+	if car.Parent then
+		activeCars[car] = car:GetPivot()
+	end
 end
 
 -- 🛠️ SCAN PLOT
@@ -35,7 +43,7 @@ local function monitorPlot(plot)
 
 	-- 1. Track existing cars
 	for _, car in pairs(carFolder:GetChildren()) do
-		trackCar(car)
+		task.spawn(trackCar, car)
 	end
 
 	-- 2. Listen for NEW cars (When a player buys/places one)
@@ -49,14 +57,14 @@ end
 
 -- 🚀 STARTUP: Find all existing Tycoons
 for _, plot in pairs(TycoonFolder:GetChildren()) do
-	monitorPlot(plot)
+	task.spawn(monitorPlot, plot)
 end
 
 -- Listen for new Tycoons (just in case they load late)
 TycoonFolder.ChildAdded:Connect(monitorPlot)
 
--- 🔄 ANIMATION LOOP (Heartbeat runs every frame on Server)
-RunService.Heartbeat:Connect(function()
+-- 🔄 ANIMATION LOOP (RenderStepped runs every frame on Client)
+RunService.RenderStepped:Connect(function()
 	local t = time()
 
 	-- Calculate bobbing (Sine Wave)
@@ -65,7 +73,7 @@ RunService.Heartbeat:Connect(function()
 	for car, baseCF in pairs(activeCars) do
 		if car.Parent then
 			-- Apply ONLY height change (No Rotation)
-			-- Logic: Take Base Position -> Add Y Offset -> Move Car
+			-- Logic: Take Base Position -> Add Y Offset -> Move Car locally
 			car:PivotTo(baseCF * CFrame.new(0, yDisplacement, 0))
 		else
 			-- Garbage collection if car was deleted unexpectedly
