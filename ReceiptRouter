@@ -1,9 +1,9 @@
--- Purpose: Centralizes MarketplaceService.ProcessReceipt with IDEMPOTENCY & GIFTING.
+-- Purpose: Centralizes MarketplaceService.ProcessReceipt with IDEMPOTENCY, GIFTING, and VFX.
 -- Runs on: Server
 -- Location: ServerScriptService
 -- Dependencies: MarketplaceService, DataStoreService, ServerStorage, ReplicatedStorage, GiftIntentHandler
 -- Public API: MarketplaceService.ProcessReceipt (Callback)
--- Networking: N/A
+-- Networking: Server -> Client via PadUnlockEvent
 -- Security: Strict datastore error handling prevents duplicate rewards; safe container checks prevent infinite yields.
 -- Performance: Pre-evaluates conditions to ensure clean O(1) or safe O(N) control flow routing.
 -- Notes: Assumes GiftIntentHandler (_G.GetGiftReceiver) handles invalid/offline user IDs gracefully.
@@ -36,6 +36,14 @@ local CAR_PRODUCT_IDS = {
 -- 🔗 REFERENCES
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 local ShopRerollFunc = ServerStorage:WaitForChild("ShopRerollFunction")
+
+-- 📡 NEW: VFX Event Connection
+local PadUnlockEvent = ReplicatedStorage:FindFirstChild("PadUnlockEvent")
+if not PadUnlockEvent then
+	PadUnlockEvent = Instance.new("RemoteEvent")
+	PadUnlockEvent.Name = "PadUnlockEvent"
+	PadUnlockEvent.Parent = ReplicatedStorage
+end
 
 -- ✅ Base Skin Module Reference
 local BaseSkinStats
@@ -197,6 +205,11 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 
 		targetPlayer:SetAttribute("EquippedSkin", skinFound)
 		purchaseSuccess = true
+
+		-- ✨ NEW: TRIGGER CLIENT SUCCESS FOR ROBUX PURCHASES
+		if PadUnlockEvent then
+			PadUnlockEvent:FireClient(targetPlayer, true, skinFound .. " Base")
+		end
 
 	else
 		warn("⚠️ Unknown ProductID Purchased: " .. pid)
