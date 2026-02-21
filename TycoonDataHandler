@@ -1,8 +1,12 @@
--- [[ SERVER SIDE: TycoonDataHandler (SECURE V38 - SHOP SYNC + DUPE FIX + SKINS) ]]
--- -- Purpose: Handles all DataStore operations, Security Validation, and Session Management.
--- -- Runs on: Server
--- -- Location: ServerScriptService
--- -- FIXES: Inventory Duplication (Double-Count), Shop Stock Bypass, Pad Sync, Base Skins
+-- Purpose: Handles all DataStore operations, Security Validation, Session Management, and prevents item duplication.
+-- Runs on: Server
+-- Location: ServerScriptService
+-- Dependencies: Players, ServerStorage, DataStoreService, Workspace, ReplicatedStorage, HttpService, CarStats, BaseSkinStats
+-- Public API: TycoonAdminAPI (BindableFunction)
+-- Networking: TycoonAdminLog (RemoteEvent), ShopRemotes (via Bindable)
+-- Security: Server-authoritative tool validation, anti-wipe protection, fixed StarterGear duplication exploit.
+-- Performance: Batched saving, lock-based pad restoration to prevent race conditions.
+-- Notes: Assumes tools placed on pads are removed from the Backpack. StarterGear is intentionally ignored during save to prevent ghost-dupes.
 
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -14,7 +18,7 @@ local HttpService = game:GetService("HttpService")
 -- ----------------------------------------------------------------------------
 -- ⚙️ CONFIGURATION & CONSTANTS
 -- ----------------------------------------------------------------------------
-local DATA_KEY = "TycoonData_Release_V27_Optimizeddddddddddddd" 
+local DATA_KEY = "TycoonData_Release_V27_Optimizedddddsse\ddddddddd" 
 local PlayerDataStore = DataStoreService:GetDataStore(DATA_KEY)
 
 local AUTOSAVE_INTERVAL = 180        
@@ -358,14 +362,11 @@ local function save(player, isClosing)
 			end
 		end
 
-		-- ✅ PRIMARY: Backpack + Character capture all owned copies (including duplicates).
-		-- StarterGear is only used as a fallback when no live tools exist.
+		-- ✅ PRIMARY: Backpack + Character capture all owned copies.
 		scanContainer(player:FindFirstChild("Backpack"))
 		scanContainer(player.Character)
 
-		if invCount == 0 then
-			scanContainer(player:FindFirstChild("StarterGear"))
-		end
+		-- 🛑 FIX: StarterGear fallback removed to prevent ghost-item duplication exploits.
 
 		local layout = {}
 		local plotName = player:GetAttribute("OccupiedPlot")
