@@ -4,9 +4,9 @@
 -- Dependencies: ReplicatedStorage, TweenService, MarketplaceService, HttpService
 -- Public API: None (Listens to ShopRemotes)
 -- Networking: BaseUpgradeTransaction (Client -> Server)
--- Security: UI visual logic. Validations happen on the server.
--- Performance: Preloads sounds, caches UI states.
--- Notes: GiftButton now routes through Kit.Tween to inherit the dim hover effect.
+-- Security: Strict client-side transaction locks prevent remote spam and race conditions.
+-- Performance: Preloads sounds, caches UI states, reuses blur effects.
+-- Notes: GiftButton routes through Kit.Tween. Whitelists Notifications GUI. Added dedicated Cash/Robux SFX.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,7 +15,6 @@ local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local SoundService = game:GetService("SoundService") 
-local ContentProvider = game:GetService("ContentProvider") 
 
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
@@ -40,12 +39,13 @@ local CLOSE_BTN_NAME = "CloseButton"
 local FEEDBACK_LBL_NAME = "Indicator-purchase"
 local BLUR_SIZE = 24 
 
--- 🎵 SOUND PRE-LOADING
+-- 🎵 SOUND PRE-LOADING (UPDATED LOUD & DISTINCT IDs)
 local Sounds = {}
 local SFX_IDs = {
-	Success = "rbxassetid://2619623062", 
-	Fail = "rbxassetid://1526487928",
-	Equip = "rbxassetid://6895079853" 
+	CashSuccess = "rbxassetid://14810387808",  -- Loud Ca-ching!
+	RobuxSuccess = "rbxassetid://14810387808", -- Loud Ca-ching!
+	Fail = "rbxassetid://4612375233",          -- Error Buzz
+	Equip = "rbxassetid://6895079853"          -- UI Equip pop
 }
 
 for name, id in pairs(SFX_IDs) do
@@ -62,6 +62,7 @@ local hiddenGuis = {}
 local hiddenObjects = {} 
 local currentBlur = nil 
 local feedbackDebounce = false 
+local isProcessingTransaction = false 
 
 -- ============================================================================
 -- 🔊 SOUND ENGINE
@@ -74,7 +75,7 @@ end
 -- ============================================================================
 -- 🎨 FEEDBACK SYSTEM
 -- ============================================================================
-local function ShowFeedback(message, isSuccess)
+local function ShowFeedback(message, statusType)
 	local gui = PlayerGui:FindFirstChild(UI_NAME)
 	if not gui then return end
 	local frame = gui:FindFirstChild(FRAME_NAME)
@@ -83,9 +84,10 @@ local function ShowFeedback(message, isSuccess)
 	local feedbackLbl = frame:FindFirstChild(FEEDBACK_LBL_NAME, true)
 	if not feedbackLbl then return end 
 
-	if isSuccess then
+	-- 🔊 Trigger the specific sound based on the transaction result
+	if statusType == "CashSuccess" or statusType == "RobuxSuccess" then
 		feedbackLbl.TextColor3 = Color3.fromRGB(85, 255, 127) 
-		PlaySound("Success") 
+		PlaySound(statusType) 
 	else
 		feedbackLbl.TextColor3 = Color3.fromRGB(255, 85, 85) 
 		PlaySound("Fail")    
@@ -127,9 +129,9 @@ MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, produc
 
 	if isBaseSkin then
 		if isPurchased then
-			ShowFeedback("Purchase Successful!", true)
+			ShowFeedback("Purchase Successful!", "RobuxSuccess")
 		else
-			ShowFeedback("Purchase Cancelled", false)
+			ShowFeedback("Purchase Cancelled", "Fail")
 		end
 	end
 end)
@@ -186,6 +188,7 @@ local function toggleOtherGuis(shouldHide)
 				and otherGui.Name ~= "Balance Indicator"
 				and otherGui.Name ~= "TouchGui"
 				and otherGui.Name ~= "Chat"
+				and otherGui.Name ~= "Notifications" 
 			then
 				otherGui.Enabled = false
 				table.insert(hiddenGuis, otherGui)
@@ -294,10 +297,19 @@ local function ConnectCard(cardFrame, skinName)
 	-- 1. BUY CASH
 	if btnCash then
 		local function onBuyCash()
-			if feedbackDebounce then return end 
+			if isProcessingTransaction then return end 
+			isProcessingTransaction = true
+
 			local success, msg = TransactionFunc:InvokeServer(skinName, "Cash")
-			if success then ShowFeedback("Purchase Successful!", true)
-			else ShowFeedback(msg or "Purchase Failed", false) end
+
+			if success then 
+				ShowFeedback("Purchase Successful!", "CashSuccess")
+			else 
+				ShowFeedback(msg or "Purchase Failed", "Fail") 
+			end
+
+			task.wait(0.2) 
+			isProcessingTransaction = false
 		end
 
 		if Kit and Kit.Tween then Kit.Tween:SetupButton(btnCash, onBuyCash)
@@ -307,7 +319,13 @@ local function ConnectCard(cardFrame, skinName)
 	-- 2. BUY ROBUX
 	if btnRobux then
 		local function onBuyRobux()
+			if isProcessingTransaction then return end
+			isProcessingTransaction = true
+
 			TransactionFunc:InvokeServer(skinName, "Robux") 
+
+			task.wait(1) 
+			isProcessingTransaction = false
 		end
 
 		if Kit and Kit.Tween then Kit.Tween:SetupButton(btnRobux, onBuyRobux)
@@ -317,8 +335,14 @@ local function ConnectCard(cardFrame, skinName)
 	-- 3. EQUIP BUTTON
 	if btnEquip then
 		local function onEquip()
+			if isProcessingTransaction then return end
+			isProcessingTransaction = true
+
 			TransactionFunc:InvokeServer(skinName, "Equip")
 			PlaySound("Equip")
+
+			task.wait(0.1)
+			isProcessingTransaction = false
 		end
 
 		if Kit and Kit.Tween then Kit.Tween:SetupButton(btnEquip, onEquip)
@@ -328,28 +352,27 @@ local function ConnectCard(cardFrame, skinName)
 	-- 4. UNEQUIP BUTTON
 	if btnUnequip then
 		local function onUnequip()
+			if isProcessingTransaction then return end
+			isProcessingTransaction = true
+
 			TransactionFunc:InvokeServer(skinName, "Unequip")
 			PlaySound("Equip")
+
+			task.wait(0.1)
+			isProcessingTransaction = false
 		end
 
 		if Kit and Kit.Tween then Kit.Tween:SetupButton(btnUnequip, onUnequip)
 		else btnUnequip.MouseButton1Click:Connect(onUnequip) end
 	end
 
-	-- 5. 🎁 GIFT BUTTON (NOW ROUTES THROUGH KIT FOR DIM EFFECT)
+	-- 5. 🎁 GIFT BUTTON
 	if btnGift then
-		print("✅ Found GiftButton for " .. skinName .. "! Class type: " .. btnGift.ClassName)
-
 		local function onGiftClicked()
-			print("🖱️ CLICK REGISTERED ON: " .. skinName .. " Gift Button!")
-
 			local skinData = BaseSkinStats[skinName]
 
 			if skinData and skinData.ProductId then
-				print("📦 Product ID found: " .. tostring(skinData.ProductId))
-
 				if not _G.OpenGiftMenu then
-					warn("⚠️ Gift Controller hasn't loaded yet. Retrying...")
 					local attempts = 0
 					while not _G.OpenGiftMenu and attempts < 10 do
 						task.wait(0.2)
@@ -358,25 +381,16 @@ local function ConnectCard(cardFrame, skinName)
 				end
 
 				if _G.OpenGiftMenu then
-					print("🚀 Launching _G.OpenGiftMenu!")
 					_G.OpenGiftMenu(skinData.ProductId)
-				else
-					warn("❌ CRITICAL: Gift Menu function (_G.OpenGiftMenu) is missing.")
 				end
-			else
-				warn("❌ No Product ID found for " .. skinName)
 			end
 		end
 
-		-- This replaces the old raw Activated connection to give it the hover tween
 		if Kit and Kit.Tween then 
 			Kit.Tween:SetupButton(btnGift, onGiftClicked)
 		else 
 			btnGift.MouseButton1Click:Connect(onGiftClicked) 
 		end
-	else
-		local nodeClass = giftNode and giftNode.ClassName or "nil"
-		warn("❌ btnGift NOT FOUND for " .. skinName .. " (GiftButton node class: " .. nodeClass .. ")")
 	end
 end
 
@@ -387,16 +401,16 @@ local function SetupShop()
 	if not scroller then return end 
 
 	local cardSilver = scroller:FindFirstChild("Card0.1", true)
-	if cardSilver then ConnectCard(cardSilver, "Silver") else warn("⚠️ Card0.1 (Silver) not found") end
+	if cardSilver then ConnectCard(cardSilver, "Silver") end
 
 	local card1 = scroller:FindFirstChild("Card1", true)
-	if card1 then ConnectCard(card1, "Gold") else warn("⚠️ Card1 (Gold) not found") end
+	if card1 then ConnectCard(card1, "Gold") end
 
 	local card2 = scroller:FindFirstChild("Card2", true)
-	if card2 then ConnectCard(card2, "Diamond") else warn("⚠️ Card2 (Diamond) not found") end
+	if card2 then ConnectCard(card2, "Diamond") end
 
 	local card3 = scroller:FindFirstChild("Card3", true)
-	if card3 then ConnectCard(card3, "Rainbow") else warn("⚠️ Card3 (Rainbow) not found") end
+	if card3 then ConnectCard(card3, "Rainbow") end
 end
 
 -- ============================================================================
