@@ -1,6 +1,12 @@
--- [[ SERVER SCRIPT: BaseUpgradeTransactionHandler ]]
--- Purpose: Verification for Buying AND Equipping/Unequipping Skins.
+-- Purpose: Verification for Buying AND Equipping/Unequipping Skins safely.
+-- Runs on: Server
 -- Location: ServerScriptService
+-- Dependencies: ReplicatedStorage, MarketplaceService, HttpService, Players, BaseSkinStats
+-- Public API: ShopRemotes.BaseUpgradeTransaction
+-- Networking: Client invokes BaseUpgradeTransaction (RemoteFunction) -> Server processes -> Returns boolean, string
+-- Security: Transaction locks prevent spam-buying and wallet draining. Server-authoritative price checking.
+-- Performance: Lightweight table hashing for locks. pcall wrapper prevents hanging locks.
+-- Notes: Assumes BaseSkinStats module exists and is structured correctly.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -11,71 +17,98 @@ local Remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
 local TransactionFunc = Remotes:WaitForChild("BaseUpgradeTransaction")
 local StatsModule = require(ReplicatedStorage:WaitForChild("BaseSkinStats"))
 
+-- 🛡️ SECURITY: Transaction Locks
+local activeTransactions = {}
+
 -- 💰 UNIFIED TRANSACTION & EQUIP FUNCTION
 TransactionFunc.OnServerInvoke = function(player, skinName, actionType)
-	local skinData = StatsModule[skinName]
+	-- Prevent remote spam & race conditions
+	if activeTransactions[player.UserId] then
+		return false, "Transaction in progress. Please wait."
+	end
+	activeTransactions[player.UserId] = true
 
-	-- 1. READ OWNERSHIP
-	local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
-	local ownedTable = {}
-	pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
-	local ownsSkin = table.find(ownedTable, skinName)
+	-- Use a wrapper to ensure the lock is ALWAYS released, even if the script errors
+	local success, result, msg = pcall(function()
+		local skinData = StatsModule[skinName]
 
-	-- ========================================================================
-	-- 🛠️ EQUIP / UNEQUIP LOGIC (NEW)
-	-- ========================================================================
-	if actionType == "Equip" then
-		if ownsSkin then
-			player:SetAttribute("EquippedSkin", skinName)
-			print("✅ " .. player.Name .. " equipped " .. skinName)
-			return true, "Equipped"
-		else
-			return false, "You do not own this!"
-		end
-
-	elseif actionType == "Unequip" then
-		player:SetAttribute("EquippedSkin", "Default")
-		print("🚫 " .. player.Name .. " unequipped " .. skinName)
-		return true, "Unequipped"
+		-- 1. READ OWNERSHIP
+		local ownedRaw = player:GetAttribute("OwnedBaseSkins") or "[]"
+		local ownedTable = {}
+		pcall(function() ownedTable = HttpService:JSONDecode(ownedRaw) end)
+		local ownsSkin = table.find(ownedTable, skinName) ~= nil
 
 		-- ========================================================================
-		-- 💰 BUYING LOGIC (EXISTING)
+		-- 🛠️ EQUIP / UNEQUIP LOGIC
 		-- ========================================================================
-	elseif actionType == "Cash" then
-		if not skinData then return false, "Invalid Skin" end
-		if ownsSkin then return false, "Already Owned" end
+		if actionType == "Equip" then
+			if ownsSkin then
+				player:SetAttribute("EquippedSkin", skinName)
+				print("✅ " .. player.Name .. " equipped " .. skinName)
+				return true, "Equipped"
+			else
+				return false, "You do not own this!"
+			end
 
-		local leaderstats = player:FindFirstChild("leaderstats")
-		local wallet = leaderstats and leaderstats:FindFirstChild("Wallet") 
+		elseif actionType == "Unequip" then
+			player:SetAttribute("EquippedSkin", "Default")
+			print("🚫 " .. player.Name .. " unequipped " .. skinName)
+			return true, "Unequipped"
 
-		if wallet and wallet.Value >= skinData.PriceCash then
-			-- A. Deduct Money
-			wallet.Value = wallet.Value - skinData.PriceCash
+			-- ========================================================================
+			-- 💰 BUYING LOGIC
+			-- ========================================================================
+		elseif actionType == "Cash" then
+			if not skinData then return false, "Invalid Skin" end
+			if ownsSkin then return false, "Already Owned" end
 
-			-- B. Grant Ownership
-			table.insert(ownedTable, skinName)
+			local leaderstats = player:FindFirstChild("leaderstats")
+			local wallet = leaderstats and leaderstats:FindFirstChild("Wallet") 
 
-			-- C. Update Attributes (Client sees this instantly)
-			player:SetAttribute("OwnedBaseSkins", HttpService:JSONEncode(ownedTable))
-			player:SetAttribute("EquippedSkin", skinName) -- Auto-Equip on buy
+			if wallet and wallet.Value >= skinData.PriceCash then
+				-- A. Deduct Money
+				wallet.Value = wallet.Value - skinData.PriceCash
 
-			print("✅ " .. player.Name .. " bought " .. skinName .. " with Wallet Cash")
-			return true, "Success"
-		else
-			return false, "Insufficient Wallet Cash"
+				-- B. Grant Ownership
+				table.insert(ownedTable, skinName)
+
+				-- C. Update Attributes (Client sees this instantly)
+				player:SetAttribute("OwnedBaseSkins", HttpService:JSONEncode(ownedTable))
+				player:SetAttribute("EquippedSkin", skinName) -- Auto-Equip on buy
+
+				print("✅ " .. player.Name .. " bought " .. skinName .. " with Wallet Cash")
+				return true, "Success"
+			else
+				return false, "Insufficient Wallet Cash"
+			end
+
+		elseif actionType == "Robux" then
+			if not skinData then return false, "Invalid Skin" end
+			if ownsSkin then return false, "Already Owned" end
+
+			if skinData.ProductId > 0 then
+				MarketplaceService:PromptProductPurchase(player, skinData.ProductId)
+				return true, "Prompted"
+			else
+				return false, "No Product ID Configured"
+			end
 		end
 
-	elseif actionType == "Robux" then
-		if not skinData then return false, "Invalid Skin" end
-		if ownsSkin then return false, "Already Owned" end
+		return false, "Invalid Action"
+	end)
 
-		if skinData.ProductId > 0 then
-			MarketplaceService:PromptProductPurchase(player, skinData.ProductId)
-			return true, "Prompted"
-		else
-			return false, "No Product ID Configured"
-		end
+	-- Release Lock
+	activeTransactions[player.UserId] = nil
+
+	if not success then
+		warn("⚠️ Transaction Error for " .. player.Name .. ": " .. tostring(result))
+		return false, "System Error"
 	end
 
-	return false, "Invalid Action"
+	return result, msg
 end
+
+-- Cleanup locks if a player leaves mid-transaction
+Players.PlayerRemoving:Connect(function(player)
+	activeTransactions[player.UserId] = nil
+end)
