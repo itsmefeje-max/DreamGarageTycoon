@@ -1,8 +1,12 @@
--- [[ SERVER SCRIPT: TycoonHandler (Senior Sync Fix) ]]
--- -- Purpose: Manages plot assignment, wiping, and safe releasing on leave.
--- -- Runs on: Server
--- -- Location: ServerScriptService
--- -- FIXES: Data Loss Race Condition (Event-Based Locking)
+-- Purpose: Manages plot assignment in a strict ascending sequence, wiping, and safe releasing on leave.
+-- Runs on: Server
+-- Location: ServerScriptService
+-- Dependencies: Workspace.Tycoons
+-- Public API: N/A
+-- Networking: N/A
+-- Security: Server-authoritative plot assignment to prevent double-claiming.
+-- Performance: Lightweight table sort on player join; event-based data saving locks.
+-- Notes: Assumes tycoons are named sequentially (e.g., "Tycoon1", "Tycoon2").
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -11,7 +15,6 @@ local ServerStorage = game:GetService("ServerStorage")
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
 -- 🔗 SYNC EVENT (Communication with TycoonDataHandler)
--- We create this event to listen for when Data is truly saved.
 local SaveEvent = ServerStorage:FindFirstChild("TycoonSaveCompleted")
 if not SaveEvent then
 	SaveEvent = Instance.new("BindableEvent")
@@ -52,11 +55,20 @@ local function wipePlot(plot)
 	end
 end
 
--- 🏠 ASSIGN PLOT
+-- 🏠 ASSIGN PLOT (ASCENDING SEQUENCE FIX)
 local function assignPlot(player)
 	if player:GetAttribute("OccupiedPlot") then return end -- Already has one
 
-	for _, plot in pairs(TycoonFolder:GetChildren()) do
+	-- 1. Gather all plots
+	local plots = TycoonFolder:GetChildren()
+
+	-- 2. Sort plots alphabetically/numerically by Name (Ascending)
+	table.sort(plots, function(a, b)
+		return a.Name < b.Name
+	end)
+
+	-- 3. Loop through the sorted array using ipairs to respect the sequence
+	for _, plot in ipairs(plots) do
 		local ownerVal = plot:FindFirstChild("Owner")
 
 		-- ✅ CHECK: Only claim if owner string is empty
@@ -98,7 +110,6 @@ Players.PlayerRemoving:Connect(function(player)
 			-- Clearing it now allows a new player to claim/wipe it while data is still saving!
 
 			-- ⏳ EVENT LISTENER (The Senior Fix)
-			-- Instead of guessing 4 seconds, we wait for the EXACT moment data is saved.
 			local didSave = false
 			local listener
 			local waitStart = os.clock()
@@ -111,7 +122,6 @@ Players.PlayerRemoving:Connect(function(player)
 			end)
 
 			-- WAIT LOOP: Wait until Saved OR Timeout (8 Seconds Failsafe)
-			-- If the DataHandler fails to fire, we force release after 8s.
 			repeat 
 				task.wait(0.1)
 			until didSave or (os.clock() - waitStart > 8)
@@ -119,8 +129,6 @@ Players.PlayerRemoving:Connect(function(player)
 			if listener then listener:Disconnect() end
 
 			-- ✅ NOW we safely release + clean the plot
-			-- This prevents abandoned cars/pad occupancy from persisting when
-			-- nobody immediately claims the plot after a player leaves.
 			wipePlot(plot)
 			print("🔓 Released + wiped " .. plotName)
 
