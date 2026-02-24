@@ -1,0 +1,46 @@
+-- Purpose: Dynamically creates a black screen UI and smoothly tweens it in/out when commanded by the server.
+-- Runs on: Client
+-- Location: StarterPlayerScripts
+-- Dependencies: TweenService, ReplicatedStorage (TeleportUIEvent)
+-- Public API: None
+-- Networking: Listens to 'TeleportUIEvent' from the Server.
+-- Security: Client purely handles visual overlay. It does not dictate when the teleport happens.
+-- Performance: Dynamically creates the UI once to save memory. Uses Sine easing for smooth hardware-accelerated rendering.
+-- Notes: Assumes 'TeleportUIEvent' exists in ReplicatedStorage.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+local teleportEvent = ReplicatedStorage:WaitForChild("TeleportUIEvent")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Dynamically generate the black screen GUI so you don't have to build it manually
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "TeleportFadeGui"
+screenGui.IgnoreGuiInset = true -- Covers the top bar perfectly
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local fadeFrame = Instance.new("Frame")
+fadeFrame.Size = UDim2.new(1, 0, 1, 0)
+fadeFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+fadeFrame.BackgroundTransparency = 1 -- Start completely invisible
+fadeFrame.BorderSizePixel = 0
+fadeFrame.Parent = screenGui
+
+-- 1 second fade duration
+local tweenInfo = TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+
+teleportEvent.OnClientEvent:Connect(function(action)
+	if action == "FadeOut" then
+		-- Screen turns black
+		local tween = TweenService:Create(fadeFrame, tweenInfo, {BackgroundTransparency = 0})
+		tween:Play()
+	elseif action == "FadeIn" then
+		-- Screen turns clear
+		local tween = TweenService:Create(fadeFrame, tweenInfo, {BackgroundTransparency = 1})
+		tween:Play()
+	end
+end)
