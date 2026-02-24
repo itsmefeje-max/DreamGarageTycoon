@@ -1,0 +1,108 @@
+-- Purpose: Handles teleportation logic, triggering client-side UI fades, and playing SFX with strict state validation.
+-- Runs on: Server
+-- Location: Workspace/<TeleporterFolder>
+-- Dependencies: Debris service, ReplicatedStorage (TeleportUIEvent)
+-- Public API: None
+-- Networking: Fires 'TeleportUIEvent' to specific clients.
+-- Security: State check before AND after the yield to prevent exploiting or teleporting dead/removed characters.
+-- Performance: Uses Debris service for SFX cleanup.
+-- Notes: Requires 'TeleportUIEvent' in ReplicatedStorage.
+
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local teleportEvent = ReplicatedStorage:WaitForChild("TeleportUIEvent")
+
+local folder = script.Parent
+local padIsOneDirectional = folder:WaitForChild("OneWay")
+local pad1 = folder:WaitForChild("Pad1")
+local pad2 = folder:WaitForChild("Pad2")
+
+local activeTeleports = {}
+
+local function createSFXTemplate(name, soundId)
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = "rbxassetid://" .. tostring(soundId)
+	sound.Volume = 1
+	return sound
+end
+
+local sfxGoingToTemplate = createSFXTemplate("GoingToSFX", 140589682451488)
+local sfxGoingBackTemplate = createSFXTemplate("GoingBackSFX", 94847797264888)
+
+local function warpPlayer(character, targetPad, soundTemplate)
+	local player = Players:GetPlayerFromCharacter(character)
+	if not player then return end
+
+	-- 1. Tell client to fade to black
+	teleportEvent:FireClient(player, "FadeOut")
+
+	-- 2. Wait exactly 1 second for their screen to become fully black
+	task.wait(1)
+
+	-- SECURITY: Because we yielded (waited), state could have changed. 
+	-- We MUST verify the character still exists and is alive before moving them.
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+
+	if not hrp or not humanoid or humanoid.Health <= 0 then
+		-- Player died or character was destroyed during the fade. Abort and un-blind them.
+		teleportEvent:FireClient(player, "FadeIn")
+		return
+	end
+
+	-- 3. Teleport them while the screen is black
+	local targetCFrame = targetPad.CFrame * CFrame.new(0, 3, 0)
+	character:PivotTo(targetCFrame)
+
+	-- 4. Play the sound
+	if soundTemplate then
+		local soundClone = soundTemplate:Clone()
+		soundClone.Parent = hrp
+		soundClone:Play()
+		Debris:AddItem(soundClone, math.max(soundClone.TimeLength, 5))
+	end
+
+	-- 5. Tell client to fade back in
+	teleportEvent:FireClient(player, "FadeIn")
+end
+
+local function onPadTouched(hit, sourcePad, targetPad, soundTemplate, isOneWayCheck)
+	local character = hit.Parent
+	if not character then return end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+
+	if humanoid and humanoid.Health > 0 and hrp then
+
+		if isOneWayCheck and padIsOneDirectional.Value == true then
+			return
+		end
+
+		if not activeTeleports[character] then
+			activeTeleports[character] = true
+
+			-- Use task.spawn so the touch event doesn't yield, allowing multiple people to step on it at once
+			task.spawn(function()
+				warpPlayer(character, targetPad, soundTemplate)
+			end)
+
+			-- Keep the character locked out of triggering another teleport for 2.5 seconds 
+			-- (1s fade out + 1s fade in + 0.5s buffer)
+			task.delay(2.5, function()
+				activeTeleports[character] = nil
+			end)
+		end
+	end
+end
+
+pad1.Touched:Connect(function(hit)
+	onPadTouched(hit, pad1, pad2, sfxGoingToTemplate, false)
+end)
+
+pad2.Touched:Connect(function(hit)
+	onPadTouched(hit, pad2, pad1, sfxGoingBackTemplate, true)
+end)
