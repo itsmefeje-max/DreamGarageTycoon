@@ -13,53 +13,77 @@ local TycoonFolder = Workspace:WaitForChild("Tycoons")
 
 local PAY_INTERVAL = 1
 local profitAccumulator = {} 
+local FriendCache = {} -- [UserId] = { [FriendId] = true }
 
 -- ============================================================================
--- 👥 FRIEND BONUS SYSTEM
+-- 🏎️ CAR STATS LOOKUP CACHE (O(1) Access)
 -- ============================================================================
--- We update this on Join/Leave to avoid lagging the payment loop with web calls.
-local function updateFriendStats()
-	local allPlayers = Players:GetPlayers()
+local CarLookup = {}
+for id, stats in pairs(CarStats.Cars) do
+	CarLookup[id] = stats -- Key Lookup
+	CarLookup[stats.Name] = stats -- Name Lookup
+end
 
-	for _, player in ipairs(allPlayers) do
-		task.spawn(function()
-			local friendCount = 0
+-- ============================================================================
+-- 👥 FRIEND BONUS SYSTEM (OPTIMIZED O(N))
+-- ============================================================================
 
-			-- Check against every other player in the server
-			for _, otherPlayer in ipairs(allPlayers) do
-				if player ~= otherPlayer then
-					-- IsFriendsWith is a web call, so we wrap it safely
-					local success, isFriend = pcall(function()
-						return player:IsFriendsWith(otherPlayer.UserId)
-					end)
-					if success and isFriend then
-						friendCount = friendCount + 1
-					end
+local function updateMultiplier(player)
+	if not player or not FriendCache[player.UserId] then return end
+
+	local count = 0
+	for _ in pairs(FriendCache[player.UserId]) do count += 1 end
+
+	local clamped = math.min(count, 5)
+	local mult = 1 + (clamped * 0.10)
+
+	player:SetAttribute("ActiveFriends", count)
+	player:SetAttribute("FriendMultiplier", mult)
+end
+
+local function onPlayerAdded(player)
+	local uid = player.UserId
+	FriendCache[uid] = {}
+
+	task.spawn(function()
+		for _, other in ipairs(Players:GetPlayers()) do
+			if other ~= player then
+				local oid = other.UserId
+				local success, isFriend = pcall(function() return player:IsFriendsWith(oid) end)
+
+				if success and isFriend then
+					-- Add to BOTH caches
+					if FriendCache[uid] then FriendCache[uid][oid] = true end
+					if FriendCache[oid] then FriendCache[oid][uid] = true end
+
+					updateMultiplier(player)
+					updateMultiplier(other)
 				end
 			end
+		end
+		updateMultiplier(player) -- Ensure init even with 0 friends
+	end)
+end
 
-			-- Cap at 5 friends (50%)
-			local clampedCount = math.min(friendCount, 5)
-
-			-- Calculate Multiplier (1.0 + 0.1 per friend)
-			local multiplier = 1 + (clampedCount * 0.10)
-
-			-- Save attributes so other scripts (like UI) can see them
-			player:SetAttribute("ActiveFriends", friendCount)
-			player:SetAttribute("FriendMultiplier", multiplier)
-		end)
+local function onPlayerRemoving(player)
+	local uid = player.UserId
+	if FriendCache[uid] then
+		for friendId, _ in pairs(FriendCache[uid]) do
+			local friend = Players:GetPlayerByUserId(friendId)
+			if friend and FriendCache[friendId] then
+				FriendCache[friendId][uid] = nil
+				updateMultiplier(friend)
+			end
+		end
+		FriendCache[uid] = nil
 	end
 end
 
--- Listeners to update counts dynamically
-Players.PlayerAdded:Connect(function()
-	task.wait(1) -- Wait for data to load
-	updateFriendStats()
-end)
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
 
-Players.PlayerRemoving:Connect(function()
-	updateFriendStats()
-end)
+-- Init existing
+for _, p in ipairs(Players:GetPlayers()) do onPlayerAdded(p) end
 
 -- ============================================================================
 -- 🏆 SKIN MULTIPLIER HELPER
@@ -115,18 +139,9 @@ task.spawn(function()
 					local linkedCar = getLinkedCarValue(pad)
 
 					if linkedCar and linkedCar.Parent then
-						-- [[ AUDIT FIX: ROBUST LOOKUP ]]
-						local stats = CarStats.Cars[linkedCar.Name]
-
-						-- Fallback: Search by Display Name if direct key fails
-						if not stats then
-							for _, s in pairs(CarStats.Cars) do
-								if s.Name == linkedCar.Name then 
-									stats = s 
-									break 
-								end
-							end
-						end
+						-- [[ AUDIT FIX: O(1) LOOKUP ]]
+						-- Uses the pre-computed CarLookup table instead of linear search
+						local stats = CarLookup[linkedCar.Name]
 
 						if stats then
 							plotTotalCPS = plotTotalCPS + stats.CPS
