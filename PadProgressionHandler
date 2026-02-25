@@ -9,8 +9,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
 
 local TycoonFolder = Workspace:WaitForChild("Tycoons")
-local progressionConnections = {}
-
 -- ============================================================================
 -- 📡 REMOTE EVENT SETUP (Communication to Client)
 -- ============================================================================
@@ -168,28 +166,38 @@ local function setupPlot(plot)
 		local ownerVal = plot:WaitForChild("Owner", 10)
 		if not ownerVal then return end
 
+		-- ✅ MEMORY FIX: Local scope connection (No Global Table)
+		local currentConnection = nil
+
 		local function onOwnerChange(newOwner)
-			local existing = progressionConnections[plot]
-			if existing then
-				existing:Disconnect()
-				progressionConnections[plot] = nil
+			-- 1. Always cleanup previous connection immediately
+			if currentConnection then
+				currentConnection:Disconnect()
+				currentConnection = nil
 			end
+
 			if newOwner == "" then 
 				updatePadVisuals(plot, 1) 
 			else
 				local player = Players:FindFirstChild(newOwner)
 				local retries = 0
 				while not player and retries < 20 do
+					-- 🛡️ RACE FIX: Abort if owner changed while waiting
+					if ownerVal.Value ~= newOwner then return end
+
 					task.wait(0.25)
 					player = Players:FindFirstChild(newOwner)
 					retries += 1
 				end
 
+				-- 🛡️ FINAL CHECK: Abort if owner changed
+				if ownerVal.Value ~= newOwner then return end
+
 				if player then
 					local savedLevel = tonumber(player:GetAttribute("HighestUnlockedPad")) or 1
 					updatePadVisuals(plot, savedLevel)
 
-					progressionConnections[plot] = player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(function()
+					currentConnection = player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(function()
 						local newLevel = tonumber(player:GetAttribute("HighestUnlockedPad")) or 1
 						updatePadVisuals(plot, newLevel)
 					end)

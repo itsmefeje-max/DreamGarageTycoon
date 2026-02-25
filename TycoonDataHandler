@@ -503,6 +503,9 @@ local function save(player, isClosing)
 
 	local syncEvent = game.ServerStorage:FindFirstChild("TycoonSaveCompleted")
 	if syncEvent then syncEvent:Fire(player.Name) end
+
+	-- ✅ SIGNAL: Use attribute for reliable cross-script synchronization
+	player:SetAttribute("DataSaved", true)
 end
 
 local function InitializePlayer(player)
@@ -604,15 +607,20 @@ local function InitializePlayer(player)
 		local amount = player:GetAttribute("RestoredPending")
 
 		if plotName and amount and amount > 0 then
+			-- 🛡️ RACE CONDITION FIX: Set to 0 BEFORE yielding to prevent double-spending
+			player:SetAttribute("RestoredPending", 0)
+
 			local plot = TycoonFolder:FindFirstChild(plotName)
-			if plot then
-				local pendingVal = plot:WaitForChild("PendingEarnings", 10)
-				if pendingVal then
-					player:SetAttribute("RestoredPending", 0) 
-					pendingVal.Value = pendingVal.Value + amount
-					markDirty(player)
-					print("✅ RESTORED PENDING: $" .. amount .. " to " .. plot.Name)
-				end
+			local pendingVal = plot and plot:WaitForChild("PendingEarnings", 10)
+
+			if pendingVal then
+				pendingVal.Value = pendingVal.Value + amount
+				markDirty(player)
+				print("✅ RESTORED PENDING: $" .. amount .. " to " .. plot.Name)
+			else
+				-- ⚠️ FAILED: Restore the amount if plot/value missing
+				warn("⚠️ Failed to restore pending earnings. Reverting amount.")
+				player:SetAttribute("RestoredPending", amount)
 			end
 		end
 	end
