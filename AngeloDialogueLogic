@@ -1,0 +1,417 @@
+-- Purpose: Handles Camera, Dialogue Logic, and UI for Monk3yDAngelo NPC with sequenced text and custom colors.
+-- Runs on: Client
+-- Location: StarterPlayerScripts
+-- Dependencies: TweenService, Players, Workspace, SoundService, UserInputService
+-- Public API: None
+-- Networking: None (Client-side dialogue only)
+-- Security: Validates local character state before locking movement.
+-- Performance: Safely manages nested task threads to prevent self-cancellation memory locks.
+-- Notes: Contains [AngeloDebug] trace logs. Targets Monk3yDAngelo in Workspace.NPCS.
+
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local SoundService = game:GetService("SoundService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+local playerGui = player:WaitForChild("PlayerGui")
+
+print("🐛 [AngeloDebug] Script Initializing...")
+
+-- ============================================================================
+-- 🎨 COLOR CONFIGURATION
+-- ============================================================================
+local USER_COLOR = "#55AAFF"    -- Blue (Player Name Default)
+local ANGELO_COLOR = "#FF4444"  -- Red (Angelo / Player Name Exit)
+local GREEN_COLOR = "#55FF7F"   -- Green (Exit Message)
+
+-- ============================================================================
+-- 🆔 UNIQUE IDENTIFIERS
+-- ============================================================================
+local GUI_ID = "UI_NPC_Monk3yDAngelo" 
+local CONTAINER_ID = "Frame_Angelo_Container" 
+local TEXT_ID = "Text_Angelo_Dialogue"         
+
+-- BUTTON NAMES
+local BTN_INQUIRY_ID = "Btn_Angelo_Inquiry"    
+local BTN_LEAVE_ID = "Btn_Angelo_Leave"
+local ALL_BUTTON_IDS = {BTN_INQUIRY_ID, BTN_LEAVE_ID}
+
+-- 📍 NPC CONFIGURATION
+local NPC_FOLDER = "NPCS"
+local TARGET_NPC = "Monk3yDAngelo"
+local CAMERA_PART = "CameraAimPart"
+local PROMPT_NAME = "TalkPrompt" 
+
+-- 🎥 SETTINGS
+local TWEEN_INFO = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TYPEWRITER_SPEED = 0.02
+local LEAVE_DELAY = 1.5 
+
+-- 🔊 SOUNDS
+local TYPING_SOUND_ID = "rbxassetid://4676738150"
+local HOVER_SOUND_ID = "rbxassetid://6895079853" 
+local CLICK_SOUND_ID = "rbxassetid://9083627113" 
+
+-- ✨ ANIMATION SETTINGS
+local HOVER_SCALE = 1.1 
+local CLICK_SCALE = 0.9 
+local ANIM_SPEED = 0.1
+
+-- ============================================================================
+-- 🛠️ STATE VARIABLES
+-- ============================================================================
+local isInteracting = false
+local isLeaving = false
+local currentDialogueJob = nil 
+local buttonConnections = {} 
+local buttonHoverConnections = {} 
+local hiddenGuis = {}
+local hiddenObjects = {}
+local controls = require(player.PlayerScripts:WaitForChild("PlayerModule")):GetControls()
+
+-- ============================================================================
+-- 🔒 FORCE HIDE UI ON LOAD
+-- ============================================================================
+task.spawn(function()
+	local myGui = playerGui:WaitForChild(GUI_ID, 10)
+	if myGui then
+		myGui.Enabled = false 
+		local container = myGui:FindFirstChild(CONTAINER_ID, true)
+		if container then container.Visible = false end
+	end
+end)
+
+-- ============================================================================
+-- 🎬 INTERACTION FUNCTIONS
+-- ============================================================================
+
+local function setButtonsState(isActive)
+	local myGui = playerGui:FindFirstChild(GUI_ID)
+	if not myGui then return end
+
+	for _, btnID in ipairs(ALL_BUTTON_IDS) do
+		local btn = myGui:FindFirstChild(btnID, true)
+		if btn then
+			btn.Visible = isActive 
+			btn.Active = isActive  
+		end
+	end
+end
+
+local function clearConnections()
+	for _, conn in pairs(buttonConnections) do
+		if conn then conn:Disconnect() end
+	end
+	buttonConnections = {}
+
+	for _, conn in pairs(buttonHoverConnections) do
+		if conn then conn:Disconnect() end
+	end
+	buttonHoverConnections = {}
+end
+
+local function toggleNamedGuiObjects(shouldHide, objectName)
+	if shouldHide then
+		for _, obj in pairs(playerGui:GetDescendants()) do
+			if obj:IsA("GuiObject") and obj.Name == objectName and obj.Visible then
+				obj.Visible = false
+				table.insert(hiddenObjects, obj)
+			end
+		end
+	else
+		for _, obj in pairs(hiddenObjects) do
+			if obj and obj.Parent and obj:IsA("GuiObject") then
+				obj.Visible = true
+			end
+		end
+		hiddenObjects = {}
+	end
+end
+
+local function toggleOtherGuis(shouldHide)
+	if shouldHide then
+		hiddenGuis = {}
+		for _, otherGui in pairs(playerGui:GetChildren()) do
+			if otherGui:IsA("ScreenGui")
+				and otherGui.Name ~= GUI_ID
+				and otherGui.Enabled == true
+				and otherGui.Name ~= "Balance Indicator" then
+
+				otherGui.Enabled = false
+				table.insert(hiddenGuis, otherGui)
+			end
+		end
+	else
+		for _, otherGui in pairs(hiddenGuis) do
+			if otherGui and otherGui.Parent then
+				otherGui.Enabled = true
+			end
+		end
+		hiddenGuis = {}
+	end
+end
+
+local function setFocusMode(active)
+	toggleOtherGuis(active)
+	toggleNamedGuiObjects(active, "FriendBoost")
+end
+
+local function playSound(id, vol)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = vol or 0.5
+	s.Parent = SoundService
+	s:Play()
+	game.Debris:AddItem(s, 1)
+end
+
+local function getCleanTextLength(str)
+	local cleanStr = string.gsub(str, "<[^>]+>", "")
+	return utf8.len(cleanStr) or #cleanStr
+end
+
+local function typewrite(label, text, onComplete)
+	if not label then return end
+	label.RichText = true
+
+	if currentDialogueJob then 
+		task.cancel(currentDialogueJob) 
+		currentDialogueJob = nil 
+	end
+
+	label.Text = text
+	label.MaxVisibleGraphemes = 0
+
+	local len = getCleanTextLength(text)
+
+	currentDialogueJob = task.spawn(function()
+		for i = 1, len do
+			if not isInteracting and not isLeaving then break end
+			label.MaxVisibleGraphemes = i
+			if i % 3 == 0 then 
+				local s = Instance.new("Sound", SoundService)
+				s.SoundId = TYPING_SOUND_ID
+				s.Volume = 0.1
+				s.PlayOnRemove = true
+				s:Destroy()
+			end
+			task.wait(TYPEWRITER_SPEED)
+		end
+		label.MaxVisibleGraphemes = -1 
+
+		currentDialogueJob = nil
+
+		if onComplete and isInteracting then
+			task.spawn(onComplete)
+		end
+	end)
+end
+
+local function stopInteraction()
+	if not isInteracting and not isLeaving then return end
+
+	isInteracting = false
+	isLeaving = false
+
+	if currentDialogueJob then task.cancel(currentDialogueJob) end
+	clearConnections() 
+	setFocusMode(false)
+
+	camera.CameraType = Enum.CameraType.Custom
+	if controls then controls:Enable() end
+
+	if player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+
+		if hrp then hrp.Anchored = false end
+		if humanoid then humanoid.WalkSpeed = 16 end
+	end
+
+	local myGui = playerGui:FindFirstChild(GUI_ID)
+	if myGui then
+		myGui.Enabled = false
+		local container = myGui:FindFirstChild(CONTAINER_ID, true)
+		if container then container.Visible = false end
+	end
+end
+
+local function animateButton(btn)
+	if not btn:GetAttribute("OriginalSizeX") then
+		btn:SetAttribute("OriginalSizeX", btn.Size.X.Scale)
+		btn:SetAttribute("OriginalSizeXO", btn.Size.X.Offset)
+		btn:SetAttribute("OriginalSizeY", btn.Size.Y.Scale)
+		btn:SetAttribute("OriginalSizeYO", btn.Size.Y.Offset)
+	end
+
+	local origX = btn:GetAttribute("OriginalSizeX")
+	local origXO = btn:GetAttribute("OriginalSizeXO")
+	local origY = btn:GetAttribute("OriginalSizeY")
+	local origYO = btn:GetAttribute("OriginalSizeYO")
+
+	local normalSize = UDim2.new(origX, origXO, origY, origYO)
+	local hoverSize = UDim2.new(origX * HOVER_SCALE, origXO * HOVER_SCALE, origY * HOVER_SCALE, origYO * HOVER_SCALE)
+	local clickSize = UDim2.new(origX * CLICK_SCALE, origXO * CLICK_SCALE, origY * CLICK_SCALE, origYO * CLICK_SCALE)
+
+	if not UserInputService.TouchEnabled then
+		local connEnter = btn.MouseEnter:Connect(function()
+			playSound(HOVER_SOUND_ID, 0.5)
+			TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = hoverSize}):Play()
+		end)
+
+		local connLeave = btn.MouseLeave:Connect(function()
+			TweenService:Create(btn, TweenInfo.new(ANIM_SPEED), {Size = normalSize}):Play()
+		end)
+
+		table.insert(buttonHoverConnections, connEnter)
+		table.insert(buttonHoverConnections, connLeave)
+	end
+
+	local connDown = btn.MouseButton1Down:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.05), {Size = clickSize}):Play()
+	end)
+
+	local connUp = btn.MouseButton1Up:Connect(function()
+		local target = (not UserInputService.TouchEnabled) and hoverSize or normalSize
+		TweenService:Create(btn, TweenInfo.new(ANIM_SPEED, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = target}):Play()
+	end)
+
+	table.insert(buttonHoverConnections, connDown)
+	table.insert(buttonHoverConnections, connUp)
+end
+
+local function startInteraction(npcModel)
+	if isInteracting or isLeaving then return end
+
+	isInteracting = true
+	clearConnections() 
+
+	local camPart = npcModel:FindFirstChild(CAMERA_PART)
+	if not camPart then
+		warn("❌ [AngeloDebug] Error: Missing '"..CAMERA_PART.."'")
+		isInteracting = false
+		return
+	end
+
+	if controls then controls:Disable() end
+	setFocusMode(true)
+
+	if player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+
+		if humanoid then humanoid.WalkSpeed = 0 end
+		if hrp then
+			hrp.Velocity = Vector3.zero 
+			hrp.Anchored = true 
+		end
+	end
+
+	camera.CameraType = Enum.CameraType.Scriptable
+	TweenService:Create(camera, TWEEN_INFO, {CFrame = camPart.CFrame}):Play()
+
+	local myGui = playerGui:WaitForChild(GUI_ID, 5)
+	if not myGui then warn("❌ [AngeloDebug] Missing GUI") stopInteraction() return end
+
+	myGui.Enabled = true
+	local container = myGui:FindFirstChild(CONTAINER_ID, true) 
+	if not container then warn("❌ [AngeloDebug] Missing Frame") stopInteraction() return end
+
+	container.Visible = true
+	setButtonsState(false)
+
+	local dialogueLabel = container:FindFirstChild(TEXT_ID, true)
+	if dialogueLabel then
+		local coloredName = "<font color='" .. USER_COLOR .. "'>@" .. player.Name .. "</font>"
+
+		local greeting = "Welcome, " .. coloredName .. ". Looking to meet the other dealers?"
+
+		typewrite(dialogueLabel, greeting, function()
+			setButtonsState(true)
+		end)
+
+		local function connectBtn(btnName, func)
+			local btn = myGui:FindFirstChild(btnName, true)
+			if btn and btn:IsA("GuiButton") then
+				animateButton(btn) 
+
+				local conn = btn.MouseButton1Click:Connect(function()
+					playSound(CLICK_SOUND_ID, 0.5) 
+					func()
+				end)
+				table.insert(buttonConnections, conn)
+			else
+				warn("⚠️ [AngeloDebug] Warning: Could not find button '" .. btnName .. "' in UI.")
+			end
+		end
+
+		connectBtn(BTN_LEAVE_ID, function()
+			if isLeaving then return end
+			isLeaving = true 
+			clearConnections() 
+			setButtonsState(false)
+
+			if dialogueLabel then
+				local coloredRedName = "<font color='" .. ANGELO_COLOR .. "'>@" .. player.Name .. "</font>"
+				local goodbyeMsg = "<font color='" .. GREEN_COLOR .. "'>We will see you there, </font>" .. coloredRedName .. "!"
+
+				typewrite(dialogueLabel, goodbyeMsg)
+			end
+			task.wait(LEAVE_DELAY)
+			stopInteraction()
+		end)
+
+		connectBtn(BTN_INQUIRY_ID, function()
+			setButtonsState(false)
+
+			if dialogueLabel then
+				local coloredAngelo = "<font color='" .. ANGELO_COLOR .. "'>Angelo</font>"
+
+				local introText = "I'm " .. coloredAngelo .. ". I deal legendary cars at the main showroom."
+
+				-- ✅ UPDATED: Clarified to "other car dealers"
+				local padText = "Step onto that glowing pad to teleport over and meet other car dealers."
+
+				typewrite(dialogueLabel, introText, function()
+					-- ✅ UPDATED: Faster sequence flow (1 second)
+					task.wait(1) 
+
+					if not isInteracting or isLeaving then return end 
+
+					typewrite(dialogueLabel, padText, function()
+						setButtonsState(true) 
+					end)
+				end)
+			end
+		end)
+	else
+		warn("❌ [AngeloDebug] ERROR: Could not find TextLabel named '"..TEXT_ID.."' inside Container!")
+		setButtonsState(true) 
+	end
+end
+
+local function setupNPC()
+	local folder = Workspace:WaitForChild(NPC_FOLDER)
+	local npc = folder:WaitForChild(TARGET_NPC, 10)
+
+	if npc then
+		local prompt = npc:FindFirstChild(PROMPT_NAME, true) 
+		local retries = 0
+		while not prompt and retries < 10 do
+			task.wait(0.5)
+			prompt = npc:FindFirstChild(PROMPT_NAME, true)
+			retries = retries + 1
+		end
+
+		if prompt then
+			prompt.Triggered:Connect(function()
+				startInteraction(npc)
+			end)
+		end
+	end
+end
+
+setupNPC()
