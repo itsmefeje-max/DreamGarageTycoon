@@ -1,6 +1,12 @@
--- [[ LOCAL SCRIPT: MusicPlaylistManager ]]
--- -- Indicating what the script is for: Manages your specific playlist of 5 songs.
--- Auto-Pauses when Bank or Inventory opens (using the shared "GameTheme" object).
+-- Purpose: Manages the specific playlist of 5 songs and respects UI mute state.
+-- Runs on: Client
+-- Location: StarterPlayerScripts / PlayerGui
+-- Dependencies: SoundService
+-- Public API: None
+-- Networking: None
+-- Security: Client-side audio only.
+-- Performance: Minimal footprint, uses event-based song progression.
+-- Notes: Checks if Volume is > 0 before resetting to respect SettingsClient mute state.
 
 local SoundService = game:GetService("SoundService")
 
@@ -11,11 +17,11 @@ local MASTER_VOLUME = 0.5           -- The volume for your background music
 
 -- 🎵 YOUR PLAYLIST (Only the 5 IDs you requested)
 local PLAYLIST = {
-    "rbxassetid://1842150151",      
-    "rbxassetid://1836009208",      
-    "rbxassetid://9045765634",      
-    "rbxassetid://132702954752503", 
-    "rbxassetid://1848062261"      
+	"rbxassetid://1842150151",      
+	"rbxassetid://1836009208",      
+	"rbxassetid://9045765634",      
+	"rbxassetid://132702954752503", 
+	"rbxassetid://1848062261"      
 }
 
 -- ============================================================================
@@ -40,7 +46,7 @@ local currentTrackIndex = 0
 -- 2. Function to Pick the Next Song
 local function getNextTrackId()
 	if #PLAYLIST == 0 then return nil end
-	
+
 	if SHUFFLE_MODE then
 		-- Pick a random song distinct from the last one (if possible)
 		local newIndex = math.random(1, #PLAYLIST)
@@ -68,19 +74,23 @@ local function playNextSong()
 		warn("⚠️ MusicPlaylistManager: No songs in PLAYLIST table!")
 		return 
 	end
-	
+
 	print("🎵 Now Playing: " .. nextId)
-	
+
 	-- Update the ID on the SAME object
 	musicObject.SoundId = nextId
 	musicObject.TimePosition = 0
-	musicObject.Volume = MASTER_VOLUME -- Reset volume in case it was faded
 	
+	-- ✅ FIX: Only reset volume if the UI hasn't explicitly muted it to 0
+	if musicObject.Volume > 0 then
+		musicObject.Volume = MASTER_VOLUME 
+	end
+
 	-- Preload to prevent silence gaps
 	if not musicObject.IsLoaded then
 		musicObject.Loaded:Wait()
 	end
-	
+
 	musicObject:Play()
 end
 
