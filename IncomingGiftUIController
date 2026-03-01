@@ -1,0 +1,264 @@
+-- Purpose: Handles receiving, accepting, and declining incoming car gifts from other players.
+-- Runs on: Client
+-- Location: StarterPlayerScripts
+-- Dependencies: Players, ReplicatedStorage, TweenService, Debris
+-- Public API: N/A
+-- Networking: Listens to 'IncomingGift' & 'GiftResult'. Fires 'ResolveGift'.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+
+-- 📡 REMOTES
+local Remotes = ReplicatedStorage:WaitForChild("GiftRemotes", 10)
+if not Remotes then
+	warn("⚠️ IncomingGiftUI: 'GiftRemotes' missing in ReplicatedStorage!")
+	return
+end
+local IncomingGift = Remotes:WaitForChild("IncomingGift")
+local ResolveGift = Remotes:WaitForChild("ResolveGift")
+local GiftResult = Remotes:WaitForChild("GiftResult")
+
+-- ⚙️ CONFIG
+local UI_NAME = "IncomingGiftUI"
+local HOVER_TWEEN = TweenInfo.new(0.2)
+local NORMAL_COLOR = Color3.fromRGB(255, 255, 255)
+local DIM_COLOR = Color3.fromRGB(200, 200, 200)
+
+local SFX = {
+	Incoming = "rbxassetid://6895079853", -- Use same as Open from your GiftUIController
+	Click = "rbxassetid://4210586953",
+	Success = "rbxassetid://2619623062",
+	Error = "rbxassetid://1526487928"
+}
+
+local function playSfx(soundId, volume)
+	local s = Instance.new("Sound")
+	s.SoundId = soundId
+	s.Volume = volume or 0.5
+	s.Parent = PlayerGui
+	s:Play()
+	Debris:AddItem(s, 3)
+end
+
+-- ----------------------------------------------------------------------------
+-- 🎨 GUI GENERATION (Fallback if not created in Studio)
+-- ----------------------------------------------------------------------------
+local screenGui = PlayerGui:FindFirstChild(UI_NAME)
+
+if not screenGui then
+	screenGui = Instance.new("ScreenGui")
+	screenGui.Name = UI_NAME
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.Enabled = false
+	screenGui.Parent = PlayerGui
+
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "MainFrame"
+	mainFrame.Size = UDim2.new(0, 400, 0, 250)
+	mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35) -- Dark, sleek background
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = mainFrame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 175, 55) -- Gold theme
+	stroke.Thickness = 3
+	stroke.Parent = mainFrame
+
+	local titleLbl = Instance.new("TextLabel")
+	titleLbl.Name = "TitleLabel"
+	titleLbl.Size = UDim2.new(1, 0, 0, 40)
+	titleLbl.BackgroundTransparency = 1
+	titleLbl.Font = Enum.Font.GothamBold
+	titleLbl.Text = "INCOMING GIFT"
+	titleLbl.TextColor3 = Color3.fromRGB(255, 175, 55)
+	titleLbl.TextSize = 24
+	titleLbl.Parent = mainFrame
+
+	local senderLbl = Instance.new("TextLabel")
+	senderLbl.Name = "SenderLabel"
+	senderLbl.Size = UDim2.new(1, -40, 0, 50)
+	senderLbl.Position = UDim2.new(0, 20, 0, 50)
+	senderLbl.BackgroundTransparency = 1
+	senderLbl.Font = Enum.Font.GothamMedium
+	senderLbl.Text = "PlayerName wants to give you a car!"
+	senderLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	senderLbl.TextWrapped = true
+	senderLbl.TextSize = 18
+	senderLbl.Parent = mainFrame
+
+	local statusLbl = Instance.new("TextLabel")
+	statusLbl.Name = "StatusLabel"
+	statusLbl.Size = UDim2.new(1, -40, 0, 30)
+	statusLbl.Position = UDim2.new(0, 20, 0, 110)
+	statusLbl.BackgroundTransparency = 1
+	statusLbl.Font = Enum.Font.Gotham
+	statusLbl.Text = "Awaiting decision..."
+	statusLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+	statusLbl.TextSize = 16
+	statusLbl.Parent = mainFrame
+
+	local btnContainer = Instance.new("Frame")
+	btnContainer.Name = "Buttons"
+	btnContainer.Size = UDim2.new(1, 0, 0, 60)
+	btnContainer.Position = UDim2.new(0, 0, 1, -80)
+	btnContainer.BackgroundTransparency = 1
+	btnContainer.Parent = mainFrame
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 30)
+	layout.Parent = btnContainer
+
+	local acceptBtn = Instance.new("ImageButton")
+	acceptBtn.Name = "AcceptButton"
+	acceptBtn.Size = UDim2.new(0, 140, 0, 50)
+	acceptBtn.BackgroundColor3 = Color3.fromRGB(85, 255, 127) -- Green
+	acceptBtn.Image = "" -- Fallback to color if no image
+	acceptBtn.Parent = btnContainer
+	local acceptCorner = Instance.new("UICorner"); acceptCorner.CornerRadius = UDim.new(0, 8); acceptCorner.Parent = acceptBtn
+	local acceptText = Instance.new("TextLabel")
+	acceptText.Size = UDim2.new(1,0,1,0); acceptText.BackgroundTransparency = 1
+	acceptText.Font = Enum.Font.GothamBold; acceptText.Text = "ACCEPT"; acceptText.TextSize = 20
+	acceptText.TextColor3 = Color3.new(0,0,0); acceptText.Parent = acceptBtn
+
+	local declineBtn = Instance.new("ImageButton")
+	declineBtn.Name = "DeclineButton"
+	declineBtn.Size = UDim2.new(0, 140, 0, 50)
+	declineBtn.BackgroundColor3 = Color3.fromRGB(255, 85, 85) -- Red
+	declineBtn.Image = ""
+	declineBtn.Parent = btnContainer
+	local declineCorner = Instance.new("UICorner"); declineCorner.CornerRadius = UDim.new(0, 8); declineCorner.Parent = declineBtn
+	local declineText = Instance.new("TextLabel")
+	declineText.Size = UDim2.new(1,0,1,0); declineText.BackgroundTransparency = 1
+	declineText.Font = Enum.Font.GothamBold; declineText.Text = "DECLINE"; declineText.TextSize = 20
+	declineText.TextColor3 = Color3.new(0,0,0); declineText.Parent = declineBtn
+end
+
+local mainFrame = screenGui:WaitForChild("MainFrame")
+local senderLbl = mainFrame:WaitForChild("SenderLabel")
+local statusLbl = mainFrame:WaitForChild("StatusLabel")
+local btnContainer = mainFrame:WaitForChild("Buttons")
+local acceptBtn = btnContainer:WaitForChild("AcceptButton")
+local declineBtn = btnContainer:WaitForChild("DeclineButton")
+
+-- ----------------------------------------------------------------------------
+-- ✨ HOVER EFFECT
+-- ----------------------------------------------------------------------------
+local function addHover(btn)
+	if not btn or btn:GetAttribute("HoverAdded") then return end
+	btn:SetAttribute("HoverAdded", true)
+
+	local prop = nil
+	if btn:IsA("ImageButton") or btn:IsA("ImageLabel") then
+		prop = "ImageColor3"
+	elseif btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("Frame") then
+		prop = "BackgroundColor3"
+	end
+	if not prop then return end
+
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, HOVER_TWEEN, {[prop] = DIM_COLOR}):Play()
+	end)
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, HOVER_TWEEN, {[prop] = NORMAL_COLOR}):Play()
+	end)
+end
+
+addHover(acceptBtn)
+addHover(declineBtn)
+
+-- ----------------------------------------------------------------------------
+-- 💾 STATE
+-- ----------------------------------------------------------------------------
+local currentTransactionId = nil
+local isProcessing = false
+
+-- ----------------------------------------------------------------------------
+-- 🔴 CLOSE
+-- ----------------------------------------------------------------------------
+local function closeMenu(delayTime)
+	task.delay(delayTime or 0, function()
+		screenGui.Enabled = false
+		currentTransactionId = nil
+		isProcessing = false
+	end)
+end
+
+-- ----------------------------------------------------------------------------
+-- 🟢 INCOMING REQUEST
+-- ----------------------------------------------------------------------------
+IncomingGift.OnClientEvent:Connect(function(transactionId, sender, toolName)
+	if currentTransactionId then return end -- Already reviewing one
+
+	currentTransactionId = transactionId
+	isProcessing = false
+
+	-- Clean tool name (remove " Item" for display)
+	local displayName = toolName:gsub(" Item", ""):gsub("Item", "")
+
+	senderLbl.Text = "**" .. sender.Name .. "** wants to give you a **" .. displayName .. "**!"
+	statusLbl.Text = "Time remaining: 30s..."
+	statusLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+
+	-- Enable and pop in
+	screenGui.Enabled = true
+	mainFrame.Size = UDim2.new(0, 0, 0, 0)
+	TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 400, 0, 250)}):Play()
+
+	playSfx(SFX.Incoming, 0.6)
+end)
+
+-- ----------------------------------------------------------------------------
+-- 🖱️ BUTTON LOGIC
+-- ----------------------------------------------------------------------------
+acceptBtn.MouseButton1Click:Connect(function()
+	if isProcessing or not currentTransactionId then return end
+	isProcessing = true
+
+	playSfx(SFX.Click, 0.5)
+	statusLbl.Text = "Accepting transaction..."
+	statusLbl.TextColor3 = Color3.fromRGB(255, 255, 100) -- Yellow
+
+	ResolveGift:FireServer(currentTransactionId, true)
+end)
+
+declineBtn.MouseButton1Click:Connect(function()
+	if isProcessing or not currentTransactionId then return end
+	isProcessing = true
+
+	playSfx(SFX.Click, 0.5)
+	statusLbl.Text = "Declining transaction..."
+	statusLbl.TextColor3 = Color3.fromRGB(255, 85, 85) -- Red
+
+	ResolveGift:FireServer(currentTransactionId, false)
+end)
+
+-- ----------------------------------------------------------------------------
+-- 🧾 RESULT NOTIFICATION
+-- ----------------------------------------------------------------------------
+GiftResult.OnClientEvent:Connect(function(success, message)
+	statusLbl.Text = message
+
+	if success then
+		statusLbl.TextColor3 = Color3.fromRGB(85, 255, 127) -- Green
+		playSfx(SFX.Success, 0.6)
+	else
+		statusLbl.TextColor3 = Color3.fromRGB(255, 85, 85) -- Red
+		playSfx(SFX.Error, 0.6)
+	end
+
+	closeMenu(2.5) -- Close after 2.5 seconds
+end)
