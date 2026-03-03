@@ -84,6 +84,10 @@ local btnContainer = mainFrame:WaitForChild("Buttons")
 local acceptBtn = btnContainer:WaitForChild("AcceptButton")
 local declineBtn = btnContainer:WaitForChild("DeclineButton")
 
+-- Enable RichText to properly display <font> tags in text labels
+senderLbl.RichText = true
+whatIsSentLbl.RichText = true
+
 -- ----------------------------------------------------------------------------
 -- ✨ HOVER EFFECT
 -- ----------------------------------------------------------------------------
