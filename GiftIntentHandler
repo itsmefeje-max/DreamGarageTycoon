@@ -31,13 +31,14 @@ local lockedIntents = {}
 -- 📡 LISTEN FOR INTENT
 SetIntentEvent.OnServerEvent:Connect(function(buyer, receiverUserId)
 	-- Security: Validate Input Type
-	if lockedIntents[buyer.UserId] then return end
+	local currentLock = lockedIntents[buyer.UserId]
+	if currentLock and os.time() - currentLock < 15 then return end
 	if typeof(receiverUserId) == "number" then
 		-- Optional: Check if receiver actually exists in game (if you only want to gift present players)
 		-- For now, we allow offline gifting intent if your system supports it.
 		print("🎁 Gift Intent Set: " .. buyer.Name .. " wants to gift UserID: " .. receiverUserId)
 		pendingGifts[buyer.UserId] = receiverUserId
-		lockedIntents[buyer.UserId] = true
+		lockedIntents[buyer.UserId] = os.time()
 	else
 		warn("⚠️ Invalid Gift Intent from " .. buyer.Name .. ": ReceiverID is not a number.")
 	end

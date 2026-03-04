@@ -248,11 +248,13 @@ ResolveGift.OnServerEvent:Connect(function(player, transactionId, isAccepted)
 	tx.IsResolving = true -- Atomic Lock
 
 	if not isAccepted then
+		tx.IsResolving = false
 		cancelTransaction(transactionId, player.Name .. " declined the gift.", true, false)
 		return
 	end
 
 	if not tx.Sender or not tx.Sender.Parent then
+		tx.IsResolving = false
 		cancelTransaction(transactionId, "Sender left the game.", false, true)
 		return
 	end
@@ -260,11 +262,13 @@ ResolveGift.OnServerEvent:Connect(function(player, transactionId, isAccepted)
 	local senderHrp = tx.Sender.Character and tx.Sender.Character:FindFirstChild("HumanoidRootPart")
 	local receiverHrp = tx.Receiver.Character and tx.Receiver.Character:FindFirstChild("HumanoidRootPart")
 	if not senderHrp or not receiverHrp or (senderHrp.Position - receiverHrp.Position).Magnitude > MAX_DISTANCE + 5 then
+		tx.IsResolving = false
 		cancelTransaction(transactionId, "Players moved too far apart.", true, true)
 		return
 	end
 
 	if not isToolValidAndParented(tx.Sender, tx.Tool) then
+		tx.IsResolving = false
 		cancelTransaction(transactionId, "Tool is no longer valid or equipped incorrectly.", true, true)
 		return
 	end

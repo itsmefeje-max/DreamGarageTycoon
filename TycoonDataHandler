@@ -174,7 +174,7 @@ end
 -- ----------------------------------------------------------------------------
 -- 🎁 GIVE TOOL
 -- ----------------------------------------------------------------------------
-local function giveTool(player, toolName)
+local function giveTool(player, toolName, customAttributes)
 	if not player or not player.Parent then return end
 	local sourceTool = CarTools:FindFirstChild(toolName)
 	if not sourceTool then 
@@ -191,6 +191,15 @@ local function giveTool(player, toolName)
 		local gearTool = sourceTool:Clone()
 		tagIssued(backpackTool, sourceTool.Name)
 		tagIssued(gearTool, sourceTool.Name)
+
+		-- Apply custom attributes
+		if customAttributes and type(customAttributes) == "table" then
+			for attrName, attrValue in pairs(customAttributes) do
+				backpackTool:SetAttribute(attrName, attrValue)
+				gearTool:SetAttribute(attrName, attrValue)
+			end
+		end
+
 		backpackTool.Parent = player.Backpack
 		if player:FindFirstChild("StarterGear") then
 			gearTool.Parent = player.StarterGear
@@ -359,7 +368,14 @@ local function save(player, isClosing)
 					if invCount < MAX_INVENTORY_SIZE then
 						local id = tool:GetAttribute("ToolId")
 						if id then
-							table.insert(inventory, id)
+							local toolData = {ToolId = id}
+							-- Serialize custom attributes (e.g. upgrades, skins, mileage)
+							for attrName, attrValue in pairs(tool:GetAttributes()) do
+								if attrName ~= "IssuedByServer" and attrName ~= "IssuedAt" and attrName ~= "IssuedId" and attrName ~= "ToolId" then
+									toolData[attrName] = attrValue
+								end
+							end
+							table.insert(inventory, toolData)
 							invCount += 1
 						end
 					end
@@ -423,8 +439,11 @@ local function save(player, isClosing)
 					if #inventory == 0 and (oldData.Inventory and #oldData.Inventory > 0) and not session.ExplicitClear then
 						warn("⚠️ Anti-Wipe (Inventory): Preserving for " .. player.Name)
 						finalInventory = {}
-						for _, oldId in pairs(oldData.Inventory) do
-							if CarTools:FindFirstChild(oldId) then table.insert(finalInventory, oldId) end
+						for _, oldItem in pairs(oldData.Inventory) do
+							local toolId = type(oldItem) == "table" and oldItem.ToolId or oldItem
+							if toolId and CarTools:FindFirstChild(toolId) then
+								table.insert(finalInventory, oldItem)
+							end
 						end
 					end
 
@@ -490,8 +509,11 @@ local function save(player, isClosing)
 	local ok, err = pcall(executeSave)
 	if not ok then
 		warn("❌ Save Failed " .. player.Name .. ": " .. tostring(err))
-	elseif isClosing then
-		print("✅ Saved: " .. player.Name)
+	else
+		if isClosing then
+			print("✅ Saved: " .. player.Name)
+		end
+		session.ExplicitClear = false
 	end
 
 	session.IsDirty = false
@@ -575,8 +597,18 @@ local function InitializePlayer(player)
 	if player:FindFirstChild("StarterGear") then player.StarterGear:ClearAllChildren() end
 
 	if data.Inventory then
-		for _, toolName in pairs(data.Inventory) do
-			giveTool(player, toolName)
+		for _, toolItem in pairs(data.Inventory) do
+			if type(toolItem) == "table" and toolItem.ToolId then
+				local customAttributes = {}
+				for k, v in pairs(toolItem) do
+					if k ~= "ToolId" then
+						customAttributes[k] = v
+					end
+				end
+				giveTool(player, toolItem.ToolId, customAttributes)
+			else
+				giveTool(player, toolItem)
+			end
 		end
 	end
 
