@@ -50,8 +50,9 @@ local acceptBtn = mainFrame:WaitForChild("Buttons"):WaitForChild("AcceptButton")
 local declineBtn = mainFrame:WaitForChild("Buttons"):WaitForChild("DeclineButton")
 
 -- Enforce new text formatting
-acceptBtn.Text = "Confirm"
-declineBtn.Text = "Cancel"
+-- Enforce new text formatting only if they are TextButtons
+if acceptBtn:IsA("TextButton") then acceptBtn.Text = "Confirm" end
+if declineBtn:IsA("TextButton") then declineBtn.Text = "Cancel" end
 
 -- Studio Reference for Sender Notifications
 local notificationsGui = PlayerGui:WaitForChild(NOTIF_GUI_NAME, 10)
