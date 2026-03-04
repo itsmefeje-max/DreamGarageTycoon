@@ -49,6 +49,10 @@ local statusLbl = mainFrame:WaitForChild("StatusLabel")
 local acceptBtn = mainFrame:WaitForChild("Buttons"):WaitForChild("AcceptButton")
 local declineBtn = mainFrame:WaitForChild("Buttons"):WaitForChild("DeclineButton")
 
+-- Enforce new text formatting
+acceptBtn.Text = "Confirm"
+declineBtn.Text = "Cancel"
+
 -- Studio Reference for Sender Notifications
 local notificationsGui = PlayerGui:WaitForChild(NOTIF_GUI_NAME, 10)
 local sentToWhoLbl = notificationsGui:WaitForChild(SENDER_LABEL_NAME, 5)
@@ -119,19 +123,12 @@ IncomingGift.OnClientEvent:Connect(function(transactionId, sender, toolName)
 	local tier = CarStats.Cars[displayName] and CarStats.Cars[displayName].Rarity or "Common"
 	local tierHex = getRarityColorHex(tier)
 
-	mainFrame:WaitForChild("SenderLabel").Text = string.format("<font color='#55ff7f'>Received Gift from</font> <font color='%s'>@%s</font>", COLOR_USER, sanitize(sender.Name))
-	mainFrame:WaitForChild("WhatIsSent").Text = string.format("Sent a <font color='#%s'>[%s]</font> %s", tierHex, tier, displayName)
+	mainFrame:WaitForChild("SenderLabel").Text = string.format("<font color='#55ff7f'>Gift Request From</font> <font color='%s'>@%s</font>", COLOR_USER, sanitize(sender.Name))
+	mainFrame:WaitForChild("WhatIsSent").Text = string.format("Would you like to accept this <font color='#%s'>[%s]</font> %s?", tierHex, tier, displayName)
 	mainFrame:WaitForChild("Avatar").Image = "rbxthumb://type=AvatarHeadShot&id=" .. sender.UserId .. "&w=150&h=150"
 
-	local timeLeft = 30
 	statusLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
-	countdownThread = task.spawn(function()
-		while timeLeft > 0 and not isProcessing do
-			statusLbl.Text = string.format("Time remaining: %ds...", timeLeft)
-			task.wait(1)
-			timeLeft -= 1
-		end
-	end)
+	statusLbl.Text = "Please confirm or cancel."
 
 	screenGui.Enabled = true
 	mainFrame.Visible = true
@@ -160,9 +157,12 @@ GiftResult.OnClientEvent:Connect(function(success, message, toolId, isSender, ot
 		local richMsg = ""
 
 		if success then
-			if message == "SENT_PENDING" then
+			if message == "VALIDATING_PENDING" then
+				-- Validating progress indicator
+				richMsg = string.format("<font color='%s'>Validating gift...</font>", COLOR_TEXT)
+			elseif message == "SENT_PENDING" then
 				-- Initial request sent
-				richMsg = string.format("<font color='%s'>Sent gift to: </font><font color='%s'>@%s</font>", COLOR_TEXT, COLOR_USER, cleanName)
+				richMsg = string.format("<font color='%s'>Waiting for the other player to respond.</font>", COLOR_TEXT)
 			else
 				-- Acceptance confirmed
 				richMsg = string.format("<font color='%s'>Gift </font><font color='%s'>accepted</font><font color='%s'> by </font><font color='%s'>@%s</font>", COLOR_TEXT, COLOR_SUCCESS, COLOR_TEXT, COLOR_USER, cleanName)
@@ -180,7 +180,7 @@ GiftResult.OnClientEvent:Connect(function(success, message, toolId, isSender, ot
 	end
 
 	-- Logic for Receiver UI feedback
-	if screenGui.Enabled and (not isSender) then
+	if (not isSender) and currentTransactionId then
 		if countdownThread then task.cancel(countdownThread) end
 		isProcessing = true
 		statusLbl.Text = message

@@ -122,10 +122,15 @@ local function attemptInitiateGift(sender, receiver, optionalToolInstance)
 	if typeof(receiver) ~= "Instance" or not receiver:IsA("Player") or sender == receiver then return end
 	if optionalToolInstance and (typeof(optionalToolInstance) ~= "Instance" or not optionalToolInstance:IsA("Tool")) then return end
 
+	-- Debounce / Spam Prevention
+	if sender:GetAttribute("IsInitiatingGift") then return end
+	sender:SetAttribute("IsInitiatingGift", true)
+
 	-- Rate Limit
 	local lastAttempt = PlayerCooldowns[sender.UserId] or 0
 	if os.time() - lastAttempt < INITIATE_COOLDOWN then
 		sendResult(sender, false, "Please wait before gifting again.")
+		sender:SetAttribute("IsInitiatingGift", nil)
 		return
 	end
 	PlayerCooldowns[sender.UserId] = os.time()
@@ -133,9 +138,13 @@ local function attemptInitiateGift(sender, receiver, optionalToolInstance)
 	-- Distance Check
 	local senderHrp = sender.Character and sender.Character:FindFirstChild("HumanoidRootPart")
 	local receiverHrp = receiver.Character and receiver.Character:FindFirstChild("HumanoidRootPart")
-	if not senderHrp or not receiverHrp then return end
+	if not senderHrp or not receiverHrp then
+		sender:SetAttribute("IsInitiatingGift", nil)
+		return
+	end
 	if (senderHrp.Position - receiverHrp.Position).Magnitude > MAX_DISTANCE + 5 then
 		sendResult(sender, false, "You are too far away from the player.")
+		sender:SetAttribute("IsInitiatingGift", nil)
 		return
 	end
 
@@ -152,16 +161,53 @@ local function attemptInitiateGift(sender, receiver, optionalToolInstance)
 
 	if not toolInstance or not isToolValidAndParented(sender, toolInstance) then
 		sendResult(sender, false, "You must have a valid car equipped to gift it.")
+		sender:SetAttribute("IsInitiatingGift", nil)
 		return
 	end
 
 	if toolInstance:GetAttribute("GiftLocked") or LockedTools[toolInstance] then
 		sendResult(sender, false, "This car is already locked in a transaction.")
+		sender:SetAttribute("IsInitiatingGift", nil)
 		return
 	end
 
 	if ActiveIncoming[receiver.UserId] then
 		sendResult(sender, false, receiver.Name .. " is currently busy with another transaction.")
+		sender:SetAttribute("IsInitiatingGift", nil)
+		return
+	end
+
+	-- Initial Validation UI Trigger
+	sendResult(sender, true, "VALIDATING_PENDING", toolInstance:GetAttribute("ToolId"), true, receiver.Name, receiver.UserId)
+
+	-- Artificial 3-Second Validation Delay
+	task.wait(3)
+
+	-- Re-verify conditions after delay to prevent race conditions
+	if not sender.Character or not receiver.Character then
+		sendResult(sender, false, "Gift failed: player left or died.")
+		sender:SetAttribute("IsInitiatingGift", nil)
+		return
+	end
+
+	if not isToolValidAndParented(sender, toolInstance) or toolInstance:GetAttribute("GiftLocked") or LockedTools[toolInstance] then
+		sendResult(sender, false, "Gift failed: car unequipped or unavailable.")
+		sender:SetAttribute("IsInitiatingGift", nil)
+		return
+	end
+
+	if ActiveIncoming[receiver.UserId] then
+		sendResult(sender, false, "Gift failed: " .. receiver.Name .. " is busy.")
+		sender:SetAttribute("IsInitiatingGift", nil)
+		return
+	end
+
+	local senderHrpFinal = sender.Character:FindFirstChild("HumanoidRootPart")
+	local receiverHrpFinal = receiver.Character:FindFirstChild("HumanoidRootPart")
+
+	if not senderHrpFinal or not receiverHrpFinal or (senderHrpFinal.Position - receiverHrpFinal.Position).Magnitude > MAX_DISTANCE + 5 then
+		sendResult(sender, false, "Gift failed: too far away.")
+		sender:SetAttribute("IsInitiatingGift", nil)
 		return
 	end
 
@@ -187,6 +233,9 @@ local function attemptInitiateGift(sender, receiver, optionalToolInstance)
 	}
 
 	IncomingGift:FireClient(receiver, transactionId, sender, toolInstance:GetAttribute("ToolId"))
+	sendResult(sender, true, "SENT_PENDING", toolInstance:GetAttribute("ToolId"), true, receiver.Name, receiver.UserId)
+
+	sender:SetAttribute("IsInitiatingGift", nil)
 end
 
 -- 🎯 PROXIMITY PROMPT
