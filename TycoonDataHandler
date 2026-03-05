@@ -49,6 +49,64 @@ if not success then warn("⚠️ CarStats module not found.") end
 -- ----------------------------------------------------------------------------
 local SessionData = {}
 local PadLocks = {}
+local validateTool
+local giveTool
+local sanitizeInventory
+
+
+local function buildInventorySnapshotFromContainers(player)
+	local snapshot = {}
+	local seen = {}
+	local function scan(container)
+		if not container then return end
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") and validateTool(child) and not seen[child] then
+				seen[child] = true
+				local toolId = child:GetAttribute("ToolId")
+				if toolId then
+					local toolData = { ToolId = toolId }
+					for attrName, attrValue in pairs(child:GetAttributes()) do
+						if attrName ~= "IssuedByServer" and attrName ~= "IssuedAt" and attrName ~= "IssuedId" and attrName ~= "ToolId" then
+							toolData[attrName] = attrValue
+						end
+					end
+					table.insert(snapshot, toolData)
+				end
+			end
+		end
+	end
+
+	scan(player:FindFirstChild("Backpack"))
+	scan(player.Character)
+	return snapshot
+end
+
+local function restoreBackpackFromSession(player)
+	local session = SessionData[player]
+	if not session then return end
+
+	local backpack = player:FindFirstChild("Backpack") or player:WaitForChild("Backpack", 10)
+	if not backpack then return end
+
+	session.SuppressDirty = true
+	backpack:ClearAllChildren()
+	for _, toolItem in ipairs(session.InventorySnapshot or {}) do
+		if type(toolItem) == "table" and toolItem.ToolId then
+			local customAttributes = {}
+			for k, v in pairs(toolItem) do
+				if k ~= "ToolId" then
+					customAttributes[k] = v
+				end
+			end
+			giveTool(player, toolItem.ToolId, customAttributes)
+		elseif type(toolItem) == "string" then
+			giveTool(player, toolItem)
+		end
+	end
+	session.SuppressDirty = false
+	sanitizeInventory(player)
+	session.InventorySnapshot = buildInventorySnapshotFromContainers(player)
+end
 
 -- ----------------------------------------------------------------------------
 -- 🛡️ HELPER FUNCTIONS
@@ -61,7 +119,7 @@ end
 
 local function markDirty(player)
 	local session = SessionData[player]
-	if session and not session.IsDirty then 
+	if session and not session.IsDirty and not session.SuppressDirty then
 		session.IsDirty = true 
 	end
 end
@@ -78,7 +136,7 @@ local function tagIssued(tool, originalName)
 	tool:SetAttribute("ToolId", originalName)
 end
 
-local function validateTool(tool)
+validateTool = function(tool)
 	if not tool then return false end
 	if not tool:GetAttribute("IssuedByServer") then return false end
 	local id = tool:GetAttribute("ToolId")
@@ -87,9 +145,9 @@ local function validateTool(tool)
 	return true
 end
 
-local function sanitizeInventory(player)
+sanitizeInventory = function(player)
 	if not player then return end
-	local containers = {player.Backpack, player:FindFirstChild("StarterGear")}
+	local containers = {player:FindFirstChild("Backpack"), player.Character}
 
 	for _, container in ipairs(containers) do
 		if container then
@@ -174,7 +232,7 @@ end
 -- ----------------------------------------------------------------------------
 -- 🎁 GIVE TOOL
 -- ----------------------------------------------------------------------------
-local function giveTool(player, toolName, customAttributes)
+giveTool = function(player, toolName, customAttributes)
 	if not player or not player.Parent then return end
 	local sourceTool = CarTools:FindFirstChild(toolName)
 	if not sourceTool then 
@@ -188,22 +246,16 @@ local function giveTool(player, toolName, customAttributes)
 
 	if sourceTool then
 		local backpackTool = sourceTool:Clone()
-		local gearTool = sourceTool:Clone()
 		tagIssued(backpackTool, sourceTool.Name)
-		tagIssued(gearTool, sourceTool.Name)
 
 		-- Apply custom attributes
 		if customAttributes and type(customAttributes) == "table" then
 			for attrName, attrValue in pairs(customAttributes) do
 				backpackTool:SetAttribute(attrName, attrValue)
-				gearTool:SetAttribute(attrName, attrValue)
 			end
 		end
 
 		backpackTool.Parent = player.Backpack
-		if player:FindFirstChild("StarterGear") then
-			gearTool.Parent = player.StarterGear
-		end
 		markDirty(player)
 	else
 		warn("⚠️ [DATA] Invalid tool requested: " .. tostring(toolName))
@@ -429,43 +481,34 @@ local function save(player, isClosing)
 					oldData = oldData or {}
 
 					local finalInventory = inventory
+					local finalLayout = layout
 
-					-- 🛡️ ANTI-DATA ROT (INVENTORY)
-					if #inventory == 0 and (oldData.Inventory and #oldData.Inventory > 0) and not session.ExplicitClear then
-						warn("⚠️ Anti-Wipe (Inventory): Preserving for " .. player.Name)
+					local oldInvCount = oldData.Inventory and #oldData.Inventory or 0
+					local oldLayoutCount = oldData.Layout and #oldData.Layout or 0
+					local newInvCount = #inventory
+					local newLayoutCount = #layout
+
+					local oldTotalItems = oldInvCount + oldLayoutCount
+					local newTotalItems = newInvCount + newLayoutCount
+
+					if not session.ExplicitClear and oldTotalItems > 0 and newTotalItems == 0 then
+						warn("⚠️ Anti-Wipe (Total Items): Preserving previous inventory/layout for " .. player.Name)
 						finalInventory = {}
-						for _, oldItem in pairs(oldData.Inventory) do
+						for _, oldItem in pairs(oldData.Inventory or {}) do
 							local toolId = type(oldItem) == "table" and oldItem.ToolId or oldItem
 							if toolId and CarTools:FindFirstChild(toolId) then
 								table.insert(finalInventory, oldItem)
 							end
 						end
-					end
 
-					-- 🛡️ SMART ANTI-WIPE (LAYOUT)
-					local finalLayout = layout
-					local isSuspiciousLayoutWipe = (#layout == 0) and (oldData.Layout and #oldData.Layout > 0)
-
-					if isSuspiciousLayoutWipe and not session.ExplicitClear then
-						local oldInvCount = oldData.Inventory and #oldData.Inventory or 0
-						local newInvCount = #finalInventory
-
-						if newInvCount > oldInvCount then
-							print("✅ Valid Pickup Detected. Saving empty layout.")
-							finalLayout = layout 
-						else
-							warn("⚠️ Anti-Wipe (Layout): Preserving for " .. player.Name)
-							finalLayout = {}
-							local seenPads = {} 
-							for _, oldEntry in pairs(oldData.Layout) do
-								if FindModelNameFromTool(oldEntry.Tool) and not seenPads[oldEntry.Pad] then 
-									seenPads[oldEntry.Pad] = true
-									table.insert(finalLayout, oldEntry) 
-								end
+						finalLayout = {}
+						local seenPads = {}
+						for _, oldEntry in pairs(oldData.Layout or {}) do
+							if oldEntry and oldEntry.Tool and oldEntry.Pad and FindModelNameFromTool(oldEntry.Tool) and not seenPads[oldEntry.Pad] then
+								seenPads[oldEntry.Pad] = true
+								table.insert(finalLayout, oldEntry)
 							end
 						end
-					else
-						finalLayout = layout
 					end
 
 					local stillRestored = player:GetAttribute("RestoredPending") or 0
@@ -530,13 +573,32 @@ local function save(player, isClosing)
 	player:SetAttribute("DataSaved", true)
 end
 
+local function cloneInventoryData(list)
+	local cloned = {}
+	for _, item in ipairs(list or {}) do
+		if type(item) == "table" then
+			local copy = {}
+			for k, v in pairs(item) do
+				copy[k] = v
+			end
+			table.insert(cloned, copy)
+		elseif type(item) == "string" then
+			table.insert(cloned, { ToolId = item })
+		end
+	end
+	return cloned
+end
+
 local function InitializePlayer(player)
-	SessionData[player] = { 
-		LastSave = os.time(), 
-		IsDirty = false, 
-		DataLoaded = false, 
-		ExplicitClear = false, 
-		IsSaving = false        
+	SessionData[player] = {
+		LastSave = os.time(),
+		IsDirty = false,
+		DataLoaded = false,
+		ExplicitClear = false,
+		IsSaving = false,
+		InventorySnapshot = {},
+		InventoryConnections = {},
+		SuppressDirty = false
 	}
 
 	local ls = Instance.new("Folder"); ls.Name = "leaderstats"; ls.Parent = player
@@ -547,16 +609,12 @@ local function InitializePlayer(player)
 	local function setDirty() markDirty(player) end
 	cash.Changed:Connect(setDirty); wallet.Changed:Connect(setDirty); atm.Changed:Connect(setDirty)
 
-	local gear = player:WaitForChild("StarterGear", 10)
-	if gear then gear.ChildAdded:Connect(setDirty); gear.ChildRemoved:Connect(setDirty) end
-
 	local key = "User_V27_" .. player.UserId
 	local data
 	local success, err = pcall(function() data = PlayerDataStore:GetAsync(key) end)
 
 	if not success then player:Kick("Data Load Error. Rejoin.") return end
 
-	-- ✅ INITIALIZE DEFAULT DATA (Now includes OwnedBaseSkins)
 	data = data or { Inventory = {}, Layout = {}, PendingEarnings = 0, HighestUnlockedPad = 1, ShopPurchases = {}, OwnedBaseSkins = {"Default"}, EquippedSkin = "Default" }
 	data.Inventory = data.Inventory or {}
 	data.Layout = data.Layout or {}
@@ -568,50 +626,70 @@ local function InitializePlayer(player)
 	wallet.Value = data.Wallet or 0
 	atm.Value = data.ATMBalance or 0
 
-	-- [[ SHOP SYNC ]] Restore shop purchases
 	local shopBindable = ServerStorage:FindFirstChild("ShopPersistenceFunction")
 	if shopBindable then
 		shopBindable:Invoke("Load", player, data.ShopPurchases or {})
 	end
 
-	-- ✅ APPLY ATTRIBUTES (New Skins Logic)
 	player:SetAttribute("HighestUnlockedPad", data.HighestUnlockedPad or 1)
-
-	-- Sync Skins to Client via Attributes
 	local ownedJson = HttpService:JSONEncode(data.OwnedBaseSkins)
 	player:SetAttribute("OwnedBaseSkins", ownedJson)
 	player:SetAttribute("EquippedSkin", data.EquippedSkin)
 
-	-- ✅ MARK DIRTY ON CHANGE
 	player:GetAttributeChangedSignal("HighestUnlockedPad"):Connect(setDirty)
 	player:GetAttributeChangedSignal("OwnedBaseSkins"):Connect(setDirty)
 	player:GetAttributeChangedSignal("EquippedSkin"):Connect(setDirty)
 
-	-- 🛑 CLEAR DUPLICATE ITEMS
 	if player:FindFirstChild("Backpack") then player.Backpack:ClearAllChildren() end
-	if player:FindFirstChild("StarterGear") then player.StarterGear:ClearAllChildren() end
 
-	if data.Inventory then
-		for _, toolItem in pairs(data.Inventory) do
-			if type(toolItem) == "table" and toolItem.ToolId then
-				local customAttributes = {}
-				for k, v in pairs(toolItem) do
-					if k ~= "ToolId" then
-						customAttributes[k] = v
-					end
-				end
-				giveTool(player, toolItem.ToolId, customAttributes)
-			else
-				giveTool(player, toolItem)
+	SessionData[player].InventorySnapshot = cloneInventoryData(data.Inventory)
+	if #SessionData[player].InventorySnapshot == 0 and (not data.Layout or #data.Layout == 0) then
+		SessionData[player].InventorySnapshot = { { ToolId = STARTER_CAR_NAME } }
+	end
+	restoreBackpackFromSession(player)
+
+	local function updateSessionInventoryFromWorld()
+		local session = SessionData[player]
+		if not session then return end
+		session.InventorySnapshot = buildInventorySnapshotFromContainers(player)
+		markDirty(player)
+	end
+
+	local function bindInventoryContainer(container)
+		if not container then return end
+		table.insert(SessionData[player].InventoryConnections, container.ChildAdded:Connect(function(child)
+			if child:IsA("Tool") then
+				updateSessionInventoryFromWorld()
+			end
+		end))
+		table.insert(SessionData[player].InventoryConnections, container.ChildRemoved:Connect(function(child)
+			if child:IsA("Tool") then
+				updateSessionInventoryFromWorld()
+			end
+		end))
+	end
+
+	local function rebindInventoryWatchers(character)
+		local session = SessionData[player]
+		if not session then return end
+		for _, conn in ipairs(session.InventoryConnections) do
+			if conn and conn.Disconnect then
+				conn:Disconnect()
 			end
 		end
+		session.InventoryConnections = {}
+
+		bindInventoryContainer(player:FindFirstChild("Backpack"))
+		bindInventoryContainer(character)
 	end
 
-	if #data.Inventory == 0 and (not data.Layout or #data.Layout == 0) then
-		giveTool(player, STARTER_CAR_NAME)
-	end
-
-	sanitizeInventory(player)
+	player.CharacterAdded:Connect(function(character)
+		restoreBackpackFromSession(player)
+		rebindInventoryWatchers(character)
+		updateSessionInventoryFromWorld()
+	end)
+	rebindInventoryWatchers(player.Character)
+	updateSessionInventoryFromWorld()
 
 	if data.PendingEarnings and data.PendingEarnings > 0 then
 		player:SetAttribute("RestoredPending", data.PendingEarnings)
@@ -639,7 +717,6 @@ local function InitializePlayer(player)
 		local amount = player:GetAttribute("RestoredPending")
 
 		if plotName and amount and amount > 0 then
-			-- 🛡️ RACE CONDITION FIX: Set to 0 BEFORE yielding to prevent double-spending
 			player:SetAttribute("RestoredPending", 0)
 
 			local plot = TycoonFolder:FindFirstChild(plotName)
@@ -650,7 +727,6 @@ local function InitializePlayer(player)
 				markDirty(player)
 				print("✅ RESTORED PENDING: $" .. amount .. " to " .. plot.Name)
 			else
-				-- ⚠️ FAILED: Restore the amount if plot/value missing
 				warn("⚠️ Failed to restore pending earnings. Reverting amount.")
 				player:SetAttribute("RestoredPending", amount)
 			end
@@ -658,13 +734,24 @@ local function InitializePlayer(player)
 	end
 
 	player:GetAttributeChangedSignal("OccupiedPlot"):Connect(CheckAndRestorePending)
-	CheckAndRestorePending() 
+	CheckAndRestorePending()
 
 	SessionData[player].DataLoaded = true
 end
 
 Players.PlayerAdded:Connect(InitializePlayer)
-Players.PlayerRemoving:Connect(function(player) save(player, true); SessionData[player] = nil end)
+Players.PlayerRemoving:Connect(function(player)
+	local session = SessionData[player]
+	if session and session.InventoryConnections then
+		for _, conn in ipairs(session.InventoryConnections) do
+			if conn and conn.Disconnect then
+				conn:Disconnect()
+			end
+		end
+	end
+	save(player, true)
+	SessionData[player] = nil
+end)
 
 task.spawn(function() while true do task.wait(10); local now = os.time()
 		for _, player in pairs(Players:GetPlayers()) do

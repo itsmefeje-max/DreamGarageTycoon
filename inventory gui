@@ -1,9 +1,12 @@
--- [[ LOCAL SCRIPT: Inventory UI (Optimized v3 - FINAL) ]]
---      - UI pooling (no destroy/recreate spam)
---      - Event-driven inventory tracking (fast updates)
---      - No per-item Heartbeat loops (Tweens instead)
---      - FIXED: Backpack/Character respawn logic (Critical)
---      - Keeps: dynamic FOV, xCount, mobile friendly, universal glow
+-- Purpose: Renders and manages the client inventory GUI with event-driven tool tracking and equip actions.
+-- Runs on: Client
+-- Location: StarterPlayerScripts (Inventory GUI LocalScript)
+-- Dependencies: Players, StarterGui, TweenService, SoundService, ReplicatedStorage, Workspace, UserInputService, PlayerModule
+-- Public API: None (UI-local behavior only)
+-- Networking: None (no remotes fired by this script)
+-- Security: Client-only visualization; all ownership/equip authority remains server-validated.
+-- Performance: UI pooling, deferred re-renders, weak-key caches for tool references.
+-- Notes: Handles CharacterAdded transitions and prevents duplicate count events during container scans.
 
 -- Services
 local Players = game:GetService("Players")
@@ -315,7 +318,8 @@ local function updateEmptyIndicator(tierName, isEmpty)
 end
 
 -- ========= INVENTORY TRACKING =========
-local toolToCleanName = {}
+local toolToCleanName = setmetatable({}, { __mode = "k" })
+local trackedTools = setmetatable({}, { __mode = "k" })
 local counts = {}
 local sampleTool = {}
 
@@ -357,11 +361,33 @@ local function adjustCount(tool, delta)
 	end
 end
 
+local function registerTool(tool)
+	if not tool or not tool:IsA("Tool") then return end
+	if trackedTools[tool] then return end
+	trackedTools[tool] = true
+	adjustCount(tool, 1)
+end
+
+local function unregisterTool(tool)
+	if not tool or not tool:IsA("Tool") then return end
+	if not trackedTools[tool] then return end
+	trackedTools[tool] = nil
+	adjustCount(tool, -1)
+	toolToCleanName[tool] = nil
+end
+
+local function resetInventoryTracking()
+	table.clear(counts)
+	table.clear(sampleTool)
+	toolToCleanName = setmetatable({}, { __mode = "k" })
+	trackedTools = setmetatable({}, { __mode = "k" })
+end
+
 local function scanContainer(container)
 	if not container then return end
 	for _, child in ipairs(container:GetChildren()) do
 		if child:IsA("Tool") then
-			adjustCount(child, 1)
+			registerTool(child)
 		end
 	end
 end
@@ -597,18 +623,18 @@ local function renderCurrentTab()
 				local currentBp = player:FindFirstChild("Backpack")
 				if not currentBp then return end
 
-				local moveTool = currentBp:FindFirstChild((tool and tool.Name) or carName) or charNow:FindFirstChild((tool and tool.Name) or carName)
+				local humanoid = charNow:FindFirstChildOfClass("Humanoid")
+				if not humanoid then return end
+
+				local targetName = (tool and tool.Name) or carName
+				local moveTool = currentBp:FindFirstChild(targetName) or charNow:FindFirstChild(targetName)
 				if not moveTool or not moveTool:IsA("Tool") then return end
 
 				if moveTool.Parent == charNow then
-					moveTool.Parent = currentBp
+					humanoid:UnequipTools()
 				else
-					for _, obj in ipairs(charNow:GetChildren()) do
-						if obj:IsA("Tool") then
-							obj.Parent = currentBp
-						end
-					end
-					moveTool.Parent = charNow
+					humanoid:UnequipTools()
+					humanoid:EquipTool(moveTool)
 				end
 
 				if not refreshQueued then
@@ -644,14 +670,14 @@ local function bindContainer(container)
 	
 	table.insert(conns, container.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
-			adjustCount(child, 1)
+			registerTool(child)
 			scheduleRender()
 		end
 	end))
 
 	table.insert(conns, container.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
-			adjustCount(child, -1)
+			unregisterTool(child)
 			scheduleRender()
 		end
 	end))
@@ -669,10 +695,13 @@ local function onCharacter(char)
 	
 	-- When char dies, clean up char connections
 	local deathConn
-	deathConn = char.Humanoid.Died:Connect(function()
-		for _, c in ipairs(charConnections) do c:Disconnect() end
-		if deathConn then deathConn:Disconnect() end
-	end)
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		deathConn = humanoid.Died:Connect(function()
+			for _, c in ipairs(charConnections) do c:Disconnect() end
+			if deathConn then deathConn:Disconnect() end
+		end)
+	end
 	
 	scheduleRender()
 end
@@ -680,9 +709,7 @@ end
 -- Handle Respawn Logic
 player.CharacterAdded:Connect(function(char)
 	-- 1. Reset Data
-	toolToCleanName = {}
-	counts = {}
-	sampleTool = {}
+	resetInventoryTracking()
 
 	-- 2. Switch to NEW Backpack
 	currentBackpack = player:WaitForChild("Backpack")
