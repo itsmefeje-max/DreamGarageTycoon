@@ -30,6 +30,7 @@ end
 
 -- 🛡️ STATE MANAGEMENT
 local playerCooldowns = {}
+local prompt2xCooldowns = {}
 local nameToUserIdCache = {}
 local thumbnailCache = {}
 local pendingUserIdRequests = {}
@@ -305,6 +306,11 @@ TabletEvent.OnServerEvent:Connect(function(player, action, plotName, requestId)
 	elseif action == "Prompt2X" then
 		local amount = pendingVal.Value
 		if amount <= 0 then return end
+
+		local lastPrompt = prompt2xCooldowns[player.UserId] or 0
+		if (os.clock() - lastPrompt) < 1.0 then return end
+		prompt2xCooldowns[player.UserId] = os.clock()
+
 		MarketplaceService:PromptProductPurchase(player, DEV_PRODUCT_ID)
 	end
 end)

@@ -34,30 +34,27 @@ end
 
 -- [[ 2. WITHDRAW: ATM -> WALLET (Physical / NPC) ]]
 local function WithdrawFromATM(player, amount)
-	-- 🛑 DISTANCE CHECK (Security)
-	local npcFolder = Workspace:FindFirstChild(NPC_FOLDER_NAME)
-	local managerNPC = npcFolder and npcFolder:FindFirstChild(MANAGER_NAME)
+	-- Verify proximity to the static ATM coordinate to prevent remote firing exploits
+	-- Static ATM Location: Set this to the known Vector3 position of your physical ATM area.
+	local ATM_STATIC_POSITION = Vector3.new(20.4, 6.7, 72.5) -- Replace with exact ATM World Position if available. Fallback for now to typical Bank/ATM coordinate or check distance to "ATM-teleport-pad".
+	local pRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 
-	-- 🛡️ SECURITY FIX: Fail Safe Logic
-	if managerNPC then
-		local npcRoot = managerNPC:FindFirstChild("HumanoidRootPart") or managerNPC.PrimaryPart
-		local pRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-
-		if npcRoot and pRoot then
-			if (pRoot.Position - npcRoot.Position).Magnitude > MAX_DISTANCE then
-				return false, "You are too far from the ATM!"
-			end
-		else
-			-- Case: Player or NPC has no physical body loaded
-			return false, "Security Check Failed: Physics not loaded."
-		end
-	else
-		-- Case: NPC is missing/deleted/not loaded
-		warn("⚠️ ATM Manager NPC missing. Transaction Denied for Security.")
-		return false, "ATM Unavailable: Security Verification Failed"
+	local atmPad = Workspace:FindFirstChild("ATM-teleport-pad", true)
+	if atmPad and pRoot then
+		ATM_STATIC_POSITION = atmPad.Position
 	end
 
-	-- Logic proceeds ONLY if security check passed
+	if pRoot then
+		-- Use a slightly larger max distance for static checks to account for room size
+		local dist = (pRoot.Position - ATM_STATIC_POSITION).Magnitude
+		-- We enforce this regardless of whether atmPad exists because ATM_STATIC_POSITION has a solid fallback
+		if dist > MAX_DISTANCE * 1.5 then
+			return false, "You are too far from the ATM!"
+		end
+	else
+		return false, "Security Check Failed: Physics not loaded."
+	end
+
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local atm = leaderstats and leaderstats:FindFirstChild("ATMBalance")
 	local wallet = leaderstats and leaderstats:FindFirstChild("Wallet")

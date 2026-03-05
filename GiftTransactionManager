@@ -84,10 +84,28 @@ local function transferTool(sender, receiver, toolInstance)
 	local toolId = toolInstance:GetAttribute("ToolId")
 	if not toolId then return false end
 
-	local gearTool = toolInstance:Clone()
+	local CarTools = ServerStorage:FindFirstChild("CarTools")
+	if not CarTools then return false end
 
-	if receiver:FindFirstChild("Backpack") then toolInstance.Parent = receiver.Backpack end
+	local sourceTool = CarTools:FindFirstChild(toolId)
+	if not sourceTool then return false end
+
+	local backpackTool = sourceTool:Clone()
+	local gearTool = sourceTool:Clone()
+
+	-- Copy attributes (e.g., IssuedByServer, ToolId, etc.) from live tool to the new ones
+	for attrName, attrValue in pairs(toolInstance:GetAttributes()) do
+		if attrName ~= "GiftLocked" then
+			backpackTool:SetAttribute(attrName, attrValue)
+			gearTool:SetAttribute(attrName, attrValue)
+		end
+	end
+
+	if receiver:FindFirstChild("Backpack") then backpackTool.Parent = receiver.Backpack end
 	if receiver:FindFirstChild("StarterGear") then gearTool.Parent = receiver.StarterGear end
+
+	-- Destroy the original live tool to prevent engine desync
+	toolInstance:Destroy()
 
 	if sender:FindFirstChild("StarterGear") then
 		for _, gear in pairs(sender.StarterGear:GetChildren()) do
@@ -100,8 +118,12 @@ local function transferTool(sender, receiver, toolInstance)
 
 	local AdminAPI = ServerStorage:FindFirstChild("TycoonAdminAPI")
 	if AdminAPI then
-		AdminAPI:Invoke("MarkDirty", sender)
-		AdminAPI:Invoke("MarkDirty", receiver)
+		task.spawn(function()
+			pcall(function() AdminAPI:Invoke("MarkDirty", sender) end)
+		end)
+		task.spawn(function()
+			pcall(function() AdminAPI:Invoke("MarkDirty", receiver) end)
+		end)
 	end
 
 	return true
@@ -273,22 +295,21 @@ ResolveGift.OnServerEvent:Connect(function(player, transactionId, isAccepted)
 		return
 	end
 
-	-- Clear Lock BEFORE destroying the tool
-	LockedTools[tx.Tool] = nil
-	tx.Tool:SetAttribute("GiftLocked", nil)
-	ActiveIncoming[tx.Receiver.UserId] = nil
-	if tx.Timer then task.cancel(tx.Timer) end
-	if tx.UnequipConnection then tx.UnequipConnection:Disconnect() end
-
 	local success = transferTool(tx.Sender, tx.Receiver, tx.Tool)
 	if success then
+		-- Clear Lock strictly AFTER successful transfer
+		LockedTools[tx.Tool] = nil
+		if tx.Tool then
+			tx.Tool:SetAttribute("GiftLocked", nil)
+		end
+		ActiveIncoming[tx.Receiver.UserId] = nil
+		if tx.Timer then task.cancel(tx.Timer) end
+		if tx.UnequipConnection then tx.UnequipConnection:Disconnect() end
+
 		ActiveTransactions[transactionId] = nil
 		sendResult(tx.Sender, true, "Gift successfully sent to " .. tx.Receiver.Name .. "!", tx.ToolId, true, tx.Receiver.Name, tx.Receiver.UserId)
 		sendResult(tx.Receiver, true, "You received a gift from " .. tx.Sender.Name .. "!", tx.ToolId, false, tx.Sender.Name, tx.Sender.UserId)
 	else
-		-- If clone failed, restore the lock states just in case
-		LockedTools[tx.Tool] = transactionId
-		ActiveIncoming[tx.Receiver.UserId] = transactionId
 		cancelTransaction(transactionId, "Server error during transfer.", true, true)
 	end
 end)

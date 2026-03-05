@@ -126,6 +126,11 @@ for _, player in ipairs(Players:GetPlayers()) do
 						child.Enabled = isHoldingValidTool
 					end
 				end)
+
+				local prompt = hrp:FindFirstChild("GiftPrompt")
+				if prompt and prompt:IsA("ProximityPrompt") then
+					prompt.Enabled = isHoldingValidTool
+				end
 			end
 		end
 		player.CharacterAdded:Connect(function(character)

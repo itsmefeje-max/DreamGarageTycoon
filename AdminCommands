@@ -7,9 +7,11 @@ local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 -- ⚙️ CONFIGURATION
 local CarTools = ServerStorage:WaitForChild("CarTools") 
+local TycoonFolder = Workspace:WaitForChild("Tycoons")
 local FlyScriptTemplate = ServerStorage:WaitForChild("FlyClient", 5) 
 
 -- ⚠️ SECURITY: Add your UserID here
@@ -183,6 +185,52 @@ local function Action_Remove(player, toolName)
 	scanAndDestroy(player:FindFirstChild("StarterGear"))
 	if player.Character then scanAndDestroy(player.Character) end
 
+	-- Check for cars placed on the Tycoon plot
+	local plotName = player:GetAttribute("OccupiedPlot")
+	if plotName then
+		local plot = TycoonFolder:FindFirstChild(plotName)
+		if plot then
+			local placedCarsFolder = plot:FindFirstChild("PlacedCars")
+			if placedCarsFolder then
+				for _, car in pairs(placedCarsFolder:GetChildren()) do
+					if car:GetAttribute("OwnerUserId") == player.UserId then
+						if targetID == "all" or targetID == "*" then
+							car:Destroy()
+							count = count + 1
+						else
+							-- Find tool name to see if it matches targetID
+							-- Note: For exact matches, we might need FindModelNameFromTool
+							-- but AdminCommands getCleanID is simplified. We'll clean the model name.
+							local carID = getCleanID(car.Name)
+							if carID == targetID then
+								car:Destroy()
+								count = count + 1
+							end
+						end
+					end
+				end
+			end
+			-- Reset pad links for occupied pads
+			local pads = plot:FindFirstChild("Pads")
+			if pads then
+				for _, padObj in pairs(pads:GetChildren()) do
+					local isOccupied = padObj:FindFirstChild("IsOccupied", true)
+					local linkedCar = padObj:FindFirstChild("LinkedCar", true)
+					if isOccupied and linkedCar then
+						if not linkedCar.Value or not linkedCar.Value.Parent then
+							isOccupied.Value = false
+							linkedCar.Value = nil
+							local prompt = padObj:FindFirstChild("PlacePrompt", true)
+							if prompt then prompt.Enabled = true end
+							local pickup = padObj:FindFirstChild("PickupPrompt", true)
+							if pickup then pickup.Enabled = false end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	return count > 0, count
 end
 
@@ -239,6 +287,7 @@ Players.PlayerAdded:Connect(function(player)
 					for _, tool in pairs(allTools) do
 						local success, _ = Action_Give(t, tool, false)
 						if success then count = count + 1 end
+						if count % 10 == 0 then task.wait() end -- Yield every 10 tools to prevent lag spikes
 					end
 					print(string.format("🎁 [Admin] Given %d NEW items to %s", count, t.Name))
 				end
@@ -285,6 +334,9 @@ Players.PlayerAdded:Connect(function(player)
 			local targets = getTargets(player, selector)
 			for _, t in pairs(targets) do
 				Action_Remove(t, "all")
+				if TycoonAdminAPI then
+					TycoonAdminAPI:Invoke("MarkDirty", t)
+				end
 				print("🗑️ Cleared inventory of " .. t.Name)
 			end
 

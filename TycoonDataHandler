@@ -327,13 +327,8 @@ local function save(player, isClosing)
 
 	if session.IsSaving then 
 		if isClosing then
-			local s = os.clock()
-			while session.IsSaving and (os.clock() - s < 4) do
+			while session.IsSaving do
 				task.wait(0.1)
-			end
-			if session.IsSaving then
-				warn("⚠️ Save Lock timed out. Forcing save.")
-				session.IsSaving = false 
 			end
 		else
 			return 

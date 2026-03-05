@@ -68,7 +68,7 @@ local emptyIndicator = nil
 local hiddenGuis = {}
 local btnConnections = {} 
 
-local normalFov = nil
+local normalFov = 70
 local openFov = nil
 
 local savedWalkSpeed = nil
@@ -104,7 +104,7 @@ local function setMovementLocked(isLocked)
 	if not character then return end
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return end
+	if not humanoid or humanoid.Health <= 0 then return end
 
 	if isLocked then
 		if savedWalkSpeed == nil then
@@ -121,6 +121,19 @@ local function setMovementLocked(isLocked)
 		savedJumpPower = nil
 	end
 end
+
+-- Hook CharacterAdded to clear saved state
+player.CharacterAdded:Connect(function()
+	savedWalkSpeed = nil
+	savedJumpPower = nil
+	isMenuOpen = false
+	if screenGui and mainFrame then
+		mainFrame.Visible = false
+		screenGui.Enabled = false
+		toggleOtherGuis(false)
+		tweenFov(normalFov)
+	end
+end)
 
 -- ============================================================================
 -- 🎥 DYNAMIC FOV TWEEN
@@ -239,6 +252,12 @@ local function setFocusMode(isFocused)
 	detector.Visible = isFocused
 
 	if isFocused then
+		local currentCamera = Workspace.CurrentCamera
+		if currentCamera then
+			normalFov = currentCamera.FieldOfView
+			openFov = math.clamp(normalFov + OPEN_FOV_OFFSET, MIN_OPEN_FOV, normalFov)
+		end
+
 		screenGui.Enabled = true
 		mainFrame.Visible = true
 		toggleOtherGuis(true)
@@ -385,10 +404,6 @@ local function Init()
 	-- 🛡️ STRICT HIDE: Overrides any properties set in Studio immediately on load
 	screenGui.Enabled = false
 	if mainFrame then mainFrame.Visible = false end
-
-	local currentCamera = Workspace.CurrentCamera
-	normalFov = (currentCamera and currentCamera.FieldOfView) or 70
-	openFov = math.clamp(normalFov + OPEN_FOV_OFFSET, MIN_OPEN_FOV, normalFov)
 
 	detector = screenGui:FindFirstChild("OutsideDetector")
 	if not detector then

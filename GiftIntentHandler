@@ -45,8 +45,10 @@ SetIntentEvent.OnServerEvent:Connect(function(buyer, receiverUserId)
 end)
 
 local MarketplaceService = game:GetService("MarketplaceService")
-MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId)
-	lockedIntents[userId] = nil
+MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
+	if isPurchased then
+		lockedIntents[userId] = nil
+	end
 end)
 
 -- 🧹 CLEANUP (If player leaves, clear memory)
