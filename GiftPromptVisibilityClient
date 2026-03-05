@@ -9,6 +9,7 @@
 -- Notes: Monitors LocalPlayer's equipped state. Enables/disables "GiftPrompt" on all other players' HumanoidRootParts.
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -150,3 +151,24 @@ for _, player in ipairs(Players:GetPlayers()) do
 		end)
 	end
 end
+
+-- Monitor Workspace for StreamingEnabled to catch HumanoidRootParts streaming in
+Workspace.DescendantAdded:Connect(function(descendant)
+	if descendant.Name == "HumanoidRootPart" and descendant.Parent and descendant.Parent:FindFirstChild("Humanoid") then
+		local character = descendant.Parent
+		local player = Players:GetPlayerFromCharacter(character)
+		if player and player ~= LocalPlayer then
+			-- It's another player's HRP streaming in
+			descendant.ChildAdded:Connect(function(child)
+				if child.Name == "GiftPrompt" and child:IsA("ProximityPrompt") then
+					child.Enabled = isHoldingValidTool
+				end
+			end)
+
+			local prompt = descendant:FindFirstChild("GiftPrompt")
+			if prompt and prompt:IsA("ProximityPrompt") then
+				prompt.Enabled = isHoldingValidTool
+			end
+		end
+	end
+end)
