@@ -10,6 +10,8 @@
 
 local Players = game:GetService("Players")
 
+local Workspace = game:GetService("Workspace")
+
 local LocalPlayer = Players.LocalPlayer
 
 local isHoldingValidTool = false
@@ -113,6 +115,27 @@ Players.PlayerAdded:Connect(function(player)
 			end
 		end
 	end)
+end)
+
+-- StreamingEnabled support
+Workspace.DescendantAdded:Connect(function(descendant)
+	if descendant.Name == "HumanoidRootPart" and descendant.Parent then
+		local character = descendant.Parent
+		local player = Players:GetPlayerFromCharacter(character)
+
+		if player and player ~= LocalPlayer then
+			descendant.ChildAdded:Connect(function(child)
+				if child.Name == "GiftPrompt" and child:IsA("ProximityPrompt") then
+					child.Enabled = isHoldingValidTool
+				end
+			end)
+
+			local prompt = descendant:FindFirstChild("GiftPrompt")
+			if prompt and prompt:IsA("ProximityPrompt") then
+				prompt.Enabled = isHoldingValidTool
+			end
+		end
+	end
 end)
 
 -- Handle existing players

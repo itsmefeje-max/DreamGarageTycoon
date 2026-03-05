@@ -163,7 +163,7 @@ GiftResult.OnClientEvent:Connect(function(success, message, toolId, isSender, ot
 				richMsg = string.format("<font color='%s'>Validating gift...</font>", COLOR_TEXT)
 			elseif message == "SENT_PENDING" then
 				-- Initial request sent
-				richMsg = string.format("<font color='%s'>Waiting for the other player to respond.</font>", COLOR_TEXT)
+				richMsg = string.format("<font color='%s'>Gift sent to </font><font color='%s'>@%s</font><font color='%s'>! Waiting for response.</font>", COLOR_TEXT, COLOR_SUCCESS, cleanName, COLOR_TEXT)
 			else
 				-- Acceptance confirmed
 				richMsg = string.format("<font color='%s'>Gift </font><font color='%s'>accepted</font><font color='%s'> by </font><font color='%s'>@%s</font>", COLOR_TEXT, COLOR_SUCCESS, COLOR_TEXT, COLOR_USER, cleanName)

@@ -6,6 +6,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
+local GiftIntentHandler = {}
+
 -- 🛠️ FIX: Auto-Create Remotes to prevent "Deadlock"
 -- (We use FindFirstChild or Instance.new so we don't wait forever)
 local Remotes = ReplicatedStorage:FindFirstChild("GiftRemotes") 
@@ -33,14 +35,14 @@ SetIntentEvent.OnServerEvent:Connect(function(buyer, receiverUserId)
 	-- Security: Validate Input Type
 	local currentLock = lockedIntents[buyer.UserId]
 	if currentLock and os.time() - currentLock < 15 then return end
-	if typeof(receiverUserId) == "number" then
+	if typeof(receiverUserId) == "number" and receiverUserId > 0 and math.floor(receiverUserId) == receiverUserId and receiverUserId ~= math.huge then
 		-- Optional: Check if receiver actually exists in game (if you only want to gift present players)
 		-- For now, we allow offline gifting intent if your system supports it.
 		print("🎁 Gift Intent Set: " .. buyer.Name .. " wants to gift UserID: " .. receiverUserId)
 		pendingGifts[buyer.UserId] = receiverUserId
 		lockedIntents[buyer.UserId] = os.time()
 	else
-		warn("⚠️ Invalid Gift Intent from " .. buyer.Name .. ": ReceiverID is not a number.")
+		warn("⚠️ Invalid Gift Intent from " .. buyer.Name .. ": ReceiverID is invalid.")
 	end
 end)
 
@@ -58,17 +60,18 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- 🔒 EXPOSE DATA TO RECEIPT ROUTER
--- We use _G so ReceiptRouter can read this table without a circular dependency
-_G.GetGiftReceiver = function(buyerUserId)
+function GiftIntentHandler.GetGiftReceiver(buyerUserId)
 	local receiverId = pendingGifts[buyerUserId]
 
 	-- Important: Clear the intent immediately after reading so next purchase isn't accidental
 	if receiverId then
 		pendingGifts[buyerUserId] = nil 
-		print("✅ _G.GetGiftReceiver: Retrieved & Cleared intent for Buyer " .. buyerUserId)
+		print("✅ GiftIntentHandler.GetGiftReceiver: Retrieved & Cleared intent for Buyer " .. buyerUserId)
 	end
 
 	return receiverId
 end
 
 print("🟢 GiftIntentHandler: Loaded & Ready")
+
+return GiftIntentHandler

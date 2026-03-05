@@ -36,6 +36,13 @@ local thumbnailCache = {}
 local pendingUserIdRequests = {}
 local pendingThumbnailRequests = {}
 
+Players.PlayerRemoving:Connect(function(player)
+	thumbnailCache[player.UserId] = nil
+	nameToUserIdCache[player.Name] = nil
+	playerCooldowns[player.UserId] = nil
+	prompt2xCooldowns[player.UserId] = nil
+end)
+
 local function getUserIdCached(playerName)
 	if not playerName or playerName == "" then return nil end
 	local cached = nameToUserIdCache[playerName]
