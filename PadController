@@ -268,13 +268,10 @@ local function AttemptPlace(player, padObject, padPart, occupiedVal, linkedCarVa
 				end
 
 				if originalTool then
-					local backpackClone = originalTool:Clone()
-					backpackClone:SetAttribute("IssuedByServer", true)
-					backpackClone:SetAttribute("IssuedAt", os.time())
-					backpackClone:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
-					backpackClone:SetAttribute("ToolId", originalTool.Name)
-					backpackClone.CanBeDropped = false
-					backpackClone.Parent = player.Backpack
+					local AdminAPI = game:GetService("ServerStorage"):FindFirstChild("TycoonAdminAPI")
+					if AdminAPI then
+						AdminAPI:Invoke("GiveTool", player, originalTool.Name)
+					end
 				else
 					warn("❌ CRITICAL: Could not find original tool to refund: " .. tostring(secureToolId))
 				end
@@ -300,13 +297,10 @@ local function AttemptPickup(player, padObject, padPart, occupiedVal, linkedCarV
 	local foundTool = FindToolFromModelName(carName)
 
 	if foundTool then
-		local backpackClone = foundTool:Clone()
-		backpackClone:SetAttribute("IssuedByServer", true)
-		backpackClone:SetAttribute("IssuedAt", os.time())
-		backpackClone:SetAttribute("IssuedId", HttpService:GenerateGUID(false))
-		backpackClone:SetAttribute("ToolId", foundTool.Name)
-		backpackClone.CanBeDropped = false
-		backpackClone.Parent = player.Backpack
+		local AdminAPI = game:GetService("ServerStorage"):FindFirstChild("TycoonAdminAPI")
+		if AdminAPI then
+			AdminAPI:Invoke("GiveTool", player, foundTool.Name)
+		end
 
 		carToRemove:Destroy()
 

@@ -293,8 +293,14 @@ local AdminAPI = Instance.new("BindableFunction")
 AdminAPI.Name = "TycoonAdminAPI"
 AdminAPI.Parent = ServerStorage
 
-AdminAPI.OnInvoke = function(action, player)
-	if action == "ForceWipe" and player and SessionData[player] then
+AdminAPI.OnInvoke = function(action, player, param1, param2)
+	if action == "GiveTool" and player and SessionData[player] then
+		local toolName = param1
+		local customAttributes = param2
+		giveTool(player, toolName, customAttributes)
+		print("🎁 GIVETOOL API USED FOR: " .. player.Name .. " - " .. tostring(toolName))
+		return true
+	elseif action == "ForceWipe" and player and SessionData[player] then
 		-- ✅ THIS FLAG PREVENTS ANTI-WIPE FROM TRIGGERING
 		SessionData[player].ExplicitClear = true
 
@@ -378,6 +384,11 @@ local function save(player, isClosing)
 		local currentEquippedSkin = player:GetAttribute("EquippedSkin") or "Default"
 
 		local inventory = CaptureInventory(player)
+
+		if isClosing and #inventory == 0 and not session.ExplicitClear then
+			warn("⚠️ Data Loss Prevention: Captured 0 items on close. Falling back to cached inventory.")
+			inventory = session.Inventory or {}
+		end
 
 		-- 🛑 FIX: StarterGear fallback removed to prevent ghost-item duplication exploits.
 
@@ -547,19 +558,22 @@ local function InitializePlayer(player)
 	local function setDirty() markDirty(player) end
 	cash.Changed:Connect(setDirty); wallet.Changed:Connect(setDirty); atm.Changed:Connect(setDirty)
 
-	player.CharacterRemoving:Connect(function()
-		if SessionData[player] and SessionData[player].DataLoaded then
-			SessionData[player].Inventory = CaptureInventory(player)
-		end
-	end)
-
 	player.CharacterAdded:Connect(function(char)
-			local currentInv
-			if SessionData[player] and SessionData[player].DataLoaded then
-				currentInv = SessionData[player].Inventory or {}
-			else
-				currentInv = CaptureInventory(player)
-			end
+		local humanoid = char:WaitForChild("Humanoid", 10)
+		if humanoid then
+			humanoid.Died:Connect(function()
+				if SessionData[player] and SessionData[player].DataLoaded then
+					SessionData[player].Inventory = CaptureInventory(player)
+				end
+			end)
+		end
+
+		local currentInv
+		if SessionData[player] and SessionData[player].DataLoaded then
+			currentInv = SessionData[player].Inventory or {}
+		else
+			currentInv = CaptureInventory(player)
+		end
 
 		if SessionData[player] then
 			SessionData[player].Inventory = currentInv

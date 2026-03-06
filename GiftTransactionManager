@@ -90,19 +90,21 @@ local function transferTool(sender, receiver, toolInstance)
 	local sourceTool = CarTools:FindFirstChild(toolId)
 	if not sourceTool then return false end
 
-	local backpackTool = sourceTool:Clone()
-	local gearTool = sourceTool:Clone()
-
+	local customAttributes = {}
 	-- Copy attributes (e.g., IssuedByServer, ToolId, etc.) from live tool to the new ones
 	for attrName, attrValue in pairs(toolInstance:GetAttributes()) do
-		if attrName ~= "GiftLocked" then
-			backpackTool:SetAttribute(attrName, attrValue)
-			gearTool:SetAttribute(attrName, attrValue)
+		if attrName ~= "GiftLocked" and attrName ~= "IssuedByServer" and attrName ~= "IssuedAt" and attrName ~= "IssuedId" and attrName ~= "ToolId" then
+			customAttributes[attrName] = attrValue
 		end
 	end
 
-	if receiver:FindFirstChild("Backpack") then backpackTool.Parent = receiver.Backpack end
-	if receiver:FindFirstChild("StarterGear") then gearTool.Parent = receiver.StarterGear end
+	local AdminAPI = game:GetService("ServerStorage"):FindFirstChild("TycoonAdminAPI")
+	if AdminAPI then
+		AdminAPI:Invoke("GiveTool", receiver, sourceTool.Name, customAttributes)
+	else
+		warn("⚠️ TycoonAdminAPI not found in GiftTransactionManager")
+		return false
+	end
 
 	-- Destroy the original live tool to prevent engine desync
 	toolInstance:Destroy()

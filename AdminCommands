@@ -148,17 +148,12 @@ local function Action_Give(player, tool, force)
 		return false, "Already Owns Item" 
 	end
 
-	-- Give to Backpack
-	local bpTool = tool:Clone()
-	tagIssued(bpTool, tool.Name) 
-	bpTool.Parent = backpack
-
-	-- Give to StarterGear (Persistence)
-	local sg = player:FindFirstChild("StarterGear")
-	if sg then
-		local sgTool = tool:Clone()
-		tagIssued(sgTool, tool.Name)
-		sgTool.Parent = sg
+	-- Give via TycoonAdminAPI
+	local AdminAPI = game:GetService("ServerStorage"):FindFirstChild("TycoonAdminAPI")
+	if AdminAPI then
+		AdminAPI:Invoke("GiveTool", player, tool.Name)
+	else
+		warn("⚠️ TycoonAdminAPI not available in AdminCommands")
 	end
 
 	return true, "Given"
