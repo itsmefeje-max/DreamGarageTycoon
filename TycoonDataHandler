@@ -50,6 +50,9 @@ if not success then warn("⚠️ CarStats module not found.") end
 local SessionData = {}
 local PadLocks = {}
 
+-- Forward declaration to allow GiveTool to force a save to cache
+local CaptureInventory
+
 -- ----------------------------------------------------------------------------
 -- 🛡️ HELPER FUNCTIONS
 -- ----------------------------------------------------------------------------
@@ -199,6 +202,20 @@ local function giveTool(player, toolName, customAttributes)
 
 		backpackTool.Parent = player.Backpack
 		markDirty(player)
+
+		-- 🛠️ CRITICAL FIX: Instantly update SessionData.Inventory cache
+		-- to prevent data loss if the player dies or respawns before auto-save triggers.
+		-- This prevents manual append duplication issues while avoiding CaptureInventory scope issues.
+		task.spawn(function()
+			-- Yield slightly to allow Backpack addition to fully process
+			task.wait()
+			if SessionData[player] and SessionData[player].DataLoaded then
+				if CaptureInventory then
+					SessionData[player].Inventory = CaptureInventory(player)
+				end
+			end
+		end)
+
 	else
 		warn("⚠️ [DATA] Invalid tool requested: " .. tostring(toolName))
 	end
@@ -321,7 +338,7 @@ end
 -- ----------------------------------------------------------------------------
 -- 💾 SAVING (V38 - SHOP SYNC + DUPE FIX + SKINS)
 -- ----------------------------------------------------------------------------
-local function CaptureInventory(player)
+CaptureInventory = function(player)
 	local inventory = {}
 	local invCount = 0
 	local seenInstances = {}
