@@ -315,9 +315,10 @@ local function updateEmptyIndicator(tierName, isEmpty)
 end
 
 -- ========= INVENTORY TRACKING =========
-local toolToCleanName = {}
+local toolToCleanName = setmetatable({}, { __mode = "k" })
 local counts = {}
 local sampleTool = {}
+local scannedTools = setmetatable({}, { __mode = "k" })
 
 local function normalizeToolName(toolName)
 	if not CarStats or not CarStats.Cars then return nil end
@@ -361,7 +362,10 @@ local function scanContainer(container)
 	if not container then return end
 	for _, child in ipairs(container:GetChildren()) do
 		if child:IsA("Tool") then
-			adjustCount(child, 1)
+			if not scannedTools[child] then
+				scannedTools[child] = true
+				adjustCount(child, 1)
+			end
 		end
 	end
 end
@@ -600,15 +604,13 @@ local function renderCurrentTab()
 				local moveTool = currentBp:FindFirstChild((tool and tool.Name) or carName) or charNow:FindFirstChild((tool and tool.Name) or carName)
 				if not moveTool or not moveTool:IsA("Tool") then return end
 
+				local humanoid = charNow:FindFirstChildOfClass("Humanoid")
+				if not humanoid then return end
+
 				if moveTool.Parent == charNow then
 					moveTool.Parent = currentBp
 				else
-					for _, obj in ipairs(charNow:GetChildren()) do
-						if obj:IsA("Tool") then
-							obj.Parent = currentBp
-						end
-					end
-					moveTool.Parent = charNow
+					humanoid:EquipTool(moveTool)
 				end
 
 				if not refreshQueued then
@@ -644,15 +646,21 @@ local function bindContainer(container)
 	
 	table.insert(conns, container.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
-			adjustCount(child, 1)
-			scheduleRender()
+			if not scannedTools[child] then
+				scannedTools[child] = true
+				adjustCount(child, 1)
+				scheduleRender()
+			end
 		end
 	end))
 
 	table.insert(conns, container.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
-			adjustCount(child, -1)
-			scheduleRender()
+			if scannedTools[child] then
+				scannedTools[child] = nil
+				adjustCount(child, -1)
+				scheduleRender()
+			end
 		end
 	end))
 	
@@ -680,9 +688,10 @@ end
 -- Handle Respawn Logic
 player.CharacterAdded:Connect(function(char)
 	-- 1. Reset Data
-	toolToCleanName = {}
+		toolToCleanName = setmetatable({}, { __mode = "k" })
 	counts = {}
 	sampleTool = {}
+		scannedTools = setmetatable({}, { __mode = "k" })
 
 	-- 2. Switch to NEW Backpack
 	currentBackpack = player:WaitForChild("Backpack")

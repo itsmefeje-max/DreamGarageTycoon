@@ -321,6 +321,38 @@ end
 -- ----------------------------------------------------------------------------
 -- 💾 SAVING (V38 - SHOP SYNC + DUPE FIX + SKINS)
 -- ----------------------------------------------------------------------------
+local function CaptureInventory(player)
+	local inventory = {}
+	local invCount = 0
+	local seenInstances = {}
+
+	local function scanContainer(container)
+		if not container then return end
+		for _, tool in pairs(container:GetChildren()) do
+			if validateTool(tool) and not seenInstances[tool] then
+				seenInstances[tool] = true
+				if invCount < MAX_INVENTORY_SIZE then
+					local id = tool:GetAttribute("ToolId")
+					if id then
+						local toolData = {ToolId = id}
+						for attrName, attrValue in pairs(tool:GetAttributes()) do
+							if attrName ~= "IssuedByServer" and attrName ~= "IssuedAt" and attrName ~= "IssuedId" and attrName ~= "ToolId" then
+								toolData[attrName] = attrValue
+							end
+						end
+						table.insert(inventory, toolData)
+						invCount += 1
+					end
+				end
+			end
+		end
+	end
+
+	scanContainer(player:FindFirstChild("Backpack"))
+	scanContainer(player.Character)
+	return inventory
+end
+
 local function save(player, isClosing)
 	local session = SessionData[player]
 	if not session or not session.DataLoaded then return end
@@ -351,36 +383,7 @@ local function save(player, isClosing)
 		local currentOwnedSkins = HttpService:JSONDecode(currentOwnedRaw)
 		local currentEquippedSkin = player:GetAttribute("EquippedSkin") or "Default"
 
-		local inventory = {}
-		local invCount = 0
-		local seenInstances = {}
-
-		local function scanContainer(container)
-			if not container then return end
-			for _, tool in pairs(container:GetChildren()) do
-				if validateTool(tool) and not seenInstances[tool] then
-					seenInstances[tool] = true
-					if invCount < MAX_INVENTORY_SIZE then
-						local id = tool:GetAttribute("ToolId")
-						if id then
-							local toolData = {ToolId = id}
-							-- Serialize custom attributes (e.g. upgrades, skins, mileage)
-							for attrName, attrValue in pairs(tool:GetAttributes()) do
-								if attrName ~= "IssuedByServer" and attrName ~= "IssuedAt" and attrName ~= "IssuedId" and attrName ~= "ToolId" then
-									toolData[attrName] = attrValue
-								end
-							end
-							table.insert(inventory, toolData)
-							invCount += 1
-						end
-					end
-				end
-			end
-		end
-
-		-- ✅ PRIMARY: Backpack + Character capture all owned copies.
-		scanContainer(player:FindFirstChild("Backpack"))
-		scanContainer(player.Character)
+		local inventory = CaptureInventory(player)
 
 		-- 🛑 FIX: StarterGear fallback removed to prevent ghost-item duplication exploits.
 
@@ -431,7 +434,10 @@ local function save(player, isClosing)
 					local finalInventory = inventory
 
 					-- 🛡️ ANTI-DATA ROT (INVENTORY)
-					if #inventory == 0 and (oldData.Inventory and #oldData.Inventory > 0) and not session.ExplicitClear then
+					local totalCurrentItems = #inventory + #layout
+					local totalOldItems = (oldData.Inventory and #oldData.Inventory or 0) + (oldData.Layout and #oldData.Layout or 0)
+
+					if #inventory == 0 and totalCurrentItems < totalOldItems and not session.ExplicitClear then
 						warn("⚠️ Anti-Wipe (Inventory): Preserving for " .. player.Name)
 						finalInventory = {}
 						for _, oldItem in pairs(oldData.Inventory) do
@@ -550,6 +556,51 @@ local function InitializePlayer(player)
 	local gear = player:WaitForChild("StarterGear", 10)
 	if gear then gear.ChildAdded:Connect(setDirty); gear.ChildRemoved:Connect(setDirty) end
 
+	player.CharacterAdded:Connect(function(char)
+			local currentInv
+			if SessionData[player] and SessionData[player].DataLoaded then
+				currentInv = SessionData[player].Inventory or {}
+			else
+				currentInv = CaptureInventory(player)
+			end
+
+		if SessionData[player] then
+			SessionData[player].Inventory = currentInv
+		end
+
+		if player:FindFirstChild("Backpack") then player.Backpack:ClearAllChildren() end
+
+		for _, toolItem in pairs(currentInv) do
+			if type(toolItem) == "table" and toolItem.ToolId then
+				local customAttributes = {}
+				for k, v in pairs(toolItem) do
+					if k ~= "ToolId" then
+						customAttributes[k] = v
+					end
+				end
+				giveTool(player, toolItem.ToolId, customAttributes)
+			else
+				giveTool(player, toolItem)
+			end
+		end
+
+		if #currentInv == 0 then
+			giveTool(player, STARTER_CAR_NAME)
+		end
+
+		sanitizeInventory(player)
+
+			-- Hook humanoid death to snapshot inventory before Backpack is cleared
+			local humanoid = char:WaitForChild("Humanoid", 10)
+			if humanoid then
+				humanoid.Died:Connect(function()
+					if SessionData[player] and SessionData[player].DataLoaded then
+						SessionData[player].Inventory = CaptureInventory(player)
+					end
+				end)
+			end
+	end)
+
 	local key = "User_V27_" .. player.UserId
 	local data
 	local success, err = pcall(function() data = PlayerDataStore:GetAsync(key) end)
@@ -591,6 +642,8 @@ local function InitializePlayer(player)
 	if player:FindFirstChild("Backpack") then player.Backpack:ClearAllChildren() end
 	if player:FindFirstChild("StarterGear") then player.StarterGear:ClearAllChildren() end
 
+	SessionData[player].Inventory = data.Inventory
+
 	if data.Inventory then
 		for _, toolItem in pairs(data.Inventory) do
 			if type(toolItem) == "table" and toolItem.ToolId then
@@ -609,6 +662,7 @@ local function InitializePlayer(player)
 
 	if #data.Inventory == 0 and (not data.Layout or #data.Layout == 0) then
 		giveTool(player, STARTER_CAR_NAME)
+		SessionData[player].Inventory = {STARTER_CAR_NAME}
 	end
 
 	sanitizeInventory(player)
