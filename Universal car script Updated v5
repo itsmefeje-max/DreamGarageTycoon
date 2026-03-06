@@ -1,0 +1,99 @@
+-- Purpose: Prepares the car model as a lightweight, equippable tool without exploding or lagging.
+-- Runs on: Server
+-- Location: Inside the Car Tool (ServerStorage -> Backpack)
+-- Dependencies: Tool, Handle, Car Model
+-- Public API: N/A
+-- Networking: N/A
+-- Security: Server-side atomic welding to prevent client desyncs.
+-- Performance: Atomic loop (no yielding) to prevent mid-equip race conditions.
+-- Notes: Assumes the tool contains a Model representing the car.
+
+local Tool = script.Parent
+local Handle = Tool:WaitForChild("Handle")
+
+-- === SETTINGS ===
+local HEIGHT_OFFSET = 2
+local PREPARED_ATTR = "CarToolPrepared"
+-- =================
+
+Handle.Anchored = false
+Handle.CanCollide = false
+Handle.CanTouch = false
+Handle.CanQuery = false
+Handle.Transparency = 1
+
+local function getCarModel()
+	local m = Tool:FindFirstChildWhichIsA("Model")
+	if m then return m end
+
+	-- Wait until a Model is inserted
+	while Tool.Parent do
+		local child = Tool.ChildAdded:Wait()
+		if child:IsA("Model") then
+			return child
+		end
+	end
+end
+
+local function prepareOnce()
+	if Tool:GetAttribute(PREPARED_ATTR) then return end
+	Tool:SetAttribute(PREPARED_ATTR, true)
+
+	local CarModel = getCarModel()
+	if not CarModel then return end
+
+	local primary = CarModel.PrimaryPart
+	if not primary then
+		primary = CarModel:FindFirstChildWhichIsA("BasePart", true)
+		if primary then
+			CarModel.PrimaryPart = primary
+		else
+			warn("[CarTool] No BaseParts found in the car model: " .. CarModel.Name)
+			return
+		end
+	end
+
+	-- ATOMIC ASSEMBLY: Do not yield during this process!
+	-- 1. Pivot the car to the Handle's current position
+	CarModel:PivotTo(Handle.CFrame * CFrame.new(0, HEIGHT_OFFSET, 0))
+
+	-- 2. Weld all parts to the PrimaryPart instantly
+	for _, inst in ipairs(CarModel:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Anchored = false
+			inst.Massless = true
+			inst.CanCollide = false
+			inst.CanTouch = false
+			inst.CanQuery = false
+			inst.CastShadow = false
+
+			if inst ~= primary then
+				local w = inst:FindFirstChild("_CarWeld")
+				if not w then
+					w = Instance.new("WeldConstraint")
+					w.Name = "_CarWeld"
+					w.Part0 = primary
+					w.Part1 = inst
+					w.Parent = primary
+				end
+			end
+		end
+	end
+
+	-- 3. Weld the PrimaryPart to the Handle last
+	local link = Handle:FindFirstChild("HandleLink")
+	if not link then
+		link = Instance.new("WeldConstraint")
+		link.Name = "HandleLink"
+		link.Part0 = Handle
+		link.Part1 = primary
+		link.Parent = Handle
+	end
+end
+
+-- Run immediately
+prepareOnce()
+
+Tool.Equipped:Connect(function()
+	Handle.Transparency = 1
+end)
