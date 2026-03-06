@@ -621,8 +621,11 @@ local function renderCurrentTab()
 				if not humanoid then return end
 
 				if moveTool.Parent == charNow then
-					moveTool.Parent = currentBp
+					-- 🛠️ CRITICAL FIX: Do NOT set Parent manually from client. Causes Engine Desync.
+					humanoid:UnequipTools()
 				else
+					-- 🛠️ FIX: Ensure we only equip one car at a time
+					humanoid:UnequipTools()
 					humanoid:EquipTool(moveTool)
 				end
 
