@@ -7,7 +7,6 @@
 -- Security: Strict datastore error handling prevents duplicate rewards; safe container checks prevent infinite yields.
 -- Performance: Pre-evaluates conditions to ensure clean O(1) or safe O(N) control flow routing.
 -- Notes: Assumes GiftIntentHandler (_G.GetGiftReceiver) handles invalid/offline user IDs gracefully.
--- Notes: Assumes GiftIntentHandler (GiftIntentHandler.GetGiftReceiver) handles invalid/offline user IDs gracefully.
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService = game:GetService("DataStoreService")
@@ -16,8 +15,6 @@ local Workspace = game:GetService("Workspace")
 local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
-
-local GiftIntentHandler = require(game:GetService("ServerScriptService"):WaitForChild("GiftIntentHandler"))
 
 -- 💾 DATASTORE FOR RECEIPT HISTORY
 local PurchaseHistory = DataStoreService:GetDataStore("PurchaseHistory")
@@ -68,8 +65,8 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 	local targetPlayer = buyerPlayer -- Default to buyer
 	local isGift = false
 
-	if GiftIntentHandler and GiftIntentHandler.GetGiftReceiver then
-		local receiverId = GiftIntentHandler.GetGiftReceiver(buyerId)
+	if _G.GetGiftReceiver then
+		local receiverId = _G.GetGiftReceiver(buyerId)
 		if receiverId then
 			local receiver = Players:GetPlayerByUserId(receiverId)
 			if receiver then
@@ -166,11 +163,22 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
 
-			local AdminAPI = game:GetService("ServerStorage"):FindFirstChild("TycoonAdminAPI")
-			if AdminAPI then
-				AdminAPI:Invoke("GiveTool", targetPlayer, tool.Name)
+			local newTool = tool:Clone()
+			newTool:SetAttribute("IssuedByServer", true)
+			newTool:SetAttribute("IssuedAt", os.time())
+			newTool:SetAttribute("ToolId", tool.Name) 
+
+			local backpack = targetPlayer:FindFirstChild("Backpack")
+			if backpack then
+				newTool.Parent = backpack
 			else
-				warn("⚠️ AdminAPI missing in ReceiptRouter")
+				warn("⚠️ Receiver dead/respawning. Item added to StarterGear only.")
+			end
+
+			local starterGear = targetPlayer:FindFirstChild("StarterGear")
+			if starterGear then
+				local gearClone = newTool:Clone()
+				gearClone.Parent = starterGear
 			end
 
 			if isGift then
