@@ -7,11 +7,9 @@ local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 
 -- ⚙️ CONFIGURATION
 local CarTools = ServerStorage:WaitForChild("CarTools") 
-local TycoonFolder = Workspace:WaitForChild("Tycoons")
 local FlyScriptTemplate = ServerStorage:WaitForChild("FlyClient", 5) 
 
 -- ⚠️ SECURITY: Add your UserID here
@@ -59,12 +57,12 @@ local function matchTool(query)
 
 	for _, tool in pairs(getAllTools()) do
 		local id = getCleanID(tool.Name)
-		
+
 		-- 1. Exact Match (Highest Priority)
 		if id == target then 
 			return tool 
 		end
-		
+
 		-- 2. Partial Match
 		if id:find(target, 1, true) then
 			bestMatch = tool
@@ -105,9 +103,9 @@ end
 local function getTargets(speaker, selector)
 	if not selector then return {} end
 	selector = selector:lower()
-	
+
 	local allPlrs = Players:GetPlayers()
-	
+
 	if selector == "@s" or selector == "me" then 
 		return {speaker} 
 	elseif selector == "@a" or selector == "all" then 
@@ -129,7 +127,7 @@ local function getTargets(speaker, selector)
 	for _, p in pairs(allPlrs) do 
 		if p.Name:lower():sub(1, #selector) == selector then return {p} end
 	end
-	
+
 	return {}
 end
 
@@ -148,12 +146,17 @@ local function Action_Give(player, tool, force)
 		return false, "Already Owns Item" 
 	end
 
-	-- Give via TycoonAdminAPI
-	local AdminAPI = game:GetService("ServerStorage"):FindFirstChild("TycoonAdminAPI")
-	if AdminAPI then
-		AdminAPI:Invoke("GiveTool", player, tool.Name)
-	else
-		warn("⚠️ TycoonAdminAPI not available in AdminCommands")
+	-- Give to Backpack
+	local bpTool = tool:Clone()
+	tagIssued(bpTool, tool.Name) 
+	bpTool.Parent = backpack
+
+	-- Give to StarterGear (Persistence)
+	local sg = player:FindFirstChild("StarterGear")
+	if sg then
+		local sgTool = tool:Clone()
+		tagIssued(sgTool, tool.Name)
+		sgTool.Parent = sg
 	end
 
 	return true, "Given"
@@ -180,59 +183,13 @@ local function Action_Remove(player, toolName)
 	scanAndDestroy(player:FindFirstChild("StarterGear"))
 	if player.Character then scanAndDestroy(player.Character) end
 
-	-- Check for cars placed on the Tycoon plot
-	local plotName = player:GetAttribute("OccupiedPlot")
-	if plotName then
-		local plot = TycoonFolder:FindFirstChild(plotName)
-		if plot then
-			local placedCarsFolder = plot:FindFirstChild("PlacedCars")
-			if placedCarsFolder then
-				for _, car in pairs(placedCarsFolder:GetChildren()) do
-					if car:GetAttribute("OwnerUserId") == player.UserId then
-						if targetID == "all" or targetID == "*" then
-							car:Destroy()
-							count = count + 1
-						else
-							-- Find tool name to see if it matches targetID
-							-- Note: For exact matches, we might need FindModelNameFromTool
-							-- but AdminCommands getCleanID is simplified. We'll clean the model name.
-							local carID = getCleanID(car.Name)
-							if carID == targetID then
-								car:Destroy()
-								count = count + 1
-							end
-						end
-					end
-				end
-			end
-			-- Reset pad links for occupied pads
-			local pads = plot:FindFirstChild("Pads")
-			if pads then
-				for _, padObj in pairs(pads:GetChildren()) do
-					local isOccupied = padObj:FindFirstChild("IsOccupied", true)
-					local linkedCar = padObj:FindFirstChild("LinkedCar", true)
-					if isOccupied and linkedCar then
-						if not linkedCar.Value or not linkedCar.Value.Parent then
-							isOccupied.Value = false
-							linkedCar.Value = nil
-							local prompt = padObj:FindFirstChild("PlacePrompt", true)
-							if prompt then prompt.Enabled = true end
-							local pickup = padObj:FindFirstChild("PickupPrompt", true)
-							if pickup then pickup.Enabled = false end
-						end
-					end
-				end
-			end
-		end
-	end
-
 	return count > 0, count
 end
 
 local function Action_SetFlight(player, shouldFly)
 	if not player.Character then return end
 	local old = player.Character:FindFirstChild("FlyClient")
-	
+
 	if old then
 		player.Character:SetAttribute("ForceStopFly", true)
 		task.wait(0.1)
@@ -273,7 +230,7 @@ Players.PlayerAdded:Connect(function(player)
 			if not selector or itemName == "" then return end
 
 			local targets = getTargets(player, selector)
-			
+
 			-- ✅ SPECIAL LOGIC: /give [player] all
 			if itemName:lower() == "all" then
 				local allTools = getAllTools()
@@ -282,7 +239,6 @@ Players.PlayerAdded:Connect(function(player)
 					for _, tool in pairs(allTools) do
 						local success, _ = Action_Give(t, tool, false)
 						if success then count = count + 1 end
-						if count % 10 == 0 then task.wait() end -- Yield every 10 tools to prevent lag spikes
 					end
 					print(string.format("🎁 [Admin] Given %d NEW items to %s", count, t.Name))
 				end
@@ -306,14 +262,14 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 
-		-- 🔴 /remove [player] [item] (NEW)
+			-- 🔴 /remove [player] [item] (NEW)
 		elseif command == "/remove" or command == "/take" then
 			local selector = args[2]
 			local itemName = table.concat(args, " ", 3)
 			if not selector or itemName == "" then return end
 
 			local targets = getTargets(player, selector)
-			
+
 			for _, t in pairs(targets) do
 				local success, count = Action_Remove(t, itemName)
 				if success then
@@ -323,19 +279,16 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 
-		-- 🟢 /clearinventory [player] (Keeps Money/Data, Wipes Tools)
+			-- 🟢 /clearinventory [player] (Keeps Money/Data, Wipes Tools)
 		elseif command == "/clearinventory" or command == "/ci" then
 			local selector = args[2]
 			local targets = getTargets(player, selector)
 			for _, t in pairs(targets) do
 				Action_Remove(t, "all")
-				if TycoonAdminAPI then
-					TycoonAdminAPI:Invoke("MarkDirty", t)
-				end
 				print("🗑️ Cleared inventory of " .. t.Name)
 			end
 
-		-- ✈️ /fly & /unfly
+			-- ✈️ /fly & /unfly
 		elseif command == "/fly" then
 			local targets = getTargets(player, args[2])
 			for _, t in pairs(targets) do Action_SetFlight(t, true) end
@@ -346,12 +299,12 @@ Players.PlayerAdded:Connect(function(player)
 			for _, t in pairs(targets) do Action_SetFlight(t, false) end
 			print("✈️ Flight Disabled")
 
-		-- 💰 /wallet & /bank [player] [amount]
+			-- 💰 /wallet & /bank [player] [amount]
 		elseif command == "/wallet" or command == "/bank" then
 			local selector = args[2]
 			local amount = tonumber(args[3])
 			if not selector or not amount then return end
-			
+
 			local statName = (command == "/bank") and "Cash" or "Wallet"
 			local targets = getTargets(player, selector)
 
@@ -364,12 +317,12 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 
-		-- 💣 /clear [player] (FULL WIPE)
+			-- 💣 /clear [player] (FULL WIPE)
 		elseif command == "/clear" or command == "/wipe" then
 			local selector = args[2]
 			if not selector then return end
 			local targets = getTargets(player, selector)
-			
+
 			if TycoonAdminAPI then
 				for _, t in pairs(targets) do
 					TycoonAdminAPI:Invoke("ForceWipe", t)
@@ -378,8 +331,8 @@ Players.PlayerAdded:Connect(function(player)
 			else
 				warn("❌ TycoonAdminAPI missing")
 			end
-			
-		-- 📋 /list (See available cars)
+
+			-- 📋 /list (See available cars)
 		elseif command == "/list" then
 			print("🚗 Available Cars:")
 			for _, t in pairs(getAllTools()) do
