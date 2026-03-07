@@ -1,12 +1,12 @@
--- Purpose: Updates the UI TextLabel to display the current in-game time in a 12-hour AM/PM format.
+-- Purpose: Updates the UI TextLabel, toggles icons, and respects the Loading Screen.
 -- Runs on: Client
 -- Location: StarterPlayerScripts
 -- Dependencies: Lighting, Players, RunService
 -- Public API: None
 -- Networking: Reads natively replicated Lighting.ClockTime. No Remotes used.
--- Security: Strictly visual UI update. Client cannot spoof the time for the server.
--- Performance: Uses RenderStepped for UI updates to ensure smooth display without yielding.
--- Notes: Safely converts 24-hour Lighting.ClockTime to a 12-hour string.
+-- Security: Strictly visual UI update.
+-- Performance: Direct boolean assignment in RenderStepped with an early escape for loading.
+-- Notes: Checks PlayerGui for "LoadingScreenActive" attribute to prevent race conditions with custom loading screens.
 
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
@@ -14,8 +14,12 @@ local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Safely resolve UI elements
 local dayNightCycleUI = playerGui:WaitForChild("DayNightCycle")
 local timeLabel = dayNightCycleUI:WaitForChild("Time")
+local morningIcon = dayNightCycleUI:WaitForChild("Morning")
+local nightIcon = dayNightCycleUI:WaitForChild("Night")
 
 -- Converts 0-24 decimal time to 12-hour AM/PM string
 local function formatClockTime(clockTime)
@@ -26,7 +30,7 @@ local function formatClockTime(clockTime)
 
 	local displayHours = totalHours % 12
 	if displayHours == 0 then
-		displayHours = 12 -- Handles midnight (0) and noon (12)
+		displayHours = 12 
 	end
 
 	return string.format("%d:%02d %s", displayHours, minutes, suffix)
@@ -34,5 +38,22 @@ end
 
 -- Sync UI to Lighting every frame
 RunService.RenderStepped:Connect(function()
-	timeLabel.Text = formatClockTime(Lighting.ClockTime)
+	-- 1. If the custom loading screen is active, force icons hidden and abort the rest of the loop
+	if playerGui:GetAttribute("LoadingScreenActive") == true then
+		morningIcon.Visible = false
+		nightIcon.Visible = false
+		timeLabel.Visible = false -- Optional: Hides the text time during loading as well
+		return 
+	end
+
+	-- 2. Once loading is done, resume normal operations
+	timeLabel.Visible = true
+
+	local currentTime = Lighting.ClockTime
+	timeLabel.Text = formatClockTime(currentTime)
+
+	local isDay = (currentTime >= 6) and (currentTime < 18)
+
+	morningIcon.Visible = isDay
+	nightIcon.Visible = not isDay
 end)
