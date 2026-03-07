@@ -1,0 +1,27 @@
+-- Purpose: Manages a globally synchronized 40-minute day/night cycle using global background time.
+-- Runs on: Server
+-- Location: ServerScriptService
+-- Dependencies: Lighting, RunService, Workspace
+-- Public API: None
+-- Networking: Natively replicates Lighting.ClockTime. No Remotes used.
+-- Security: Server is strictly authoritative over the time of day.
+-- Performance: Sub-millisecond arithmetic on Heartbeat. Extremely optimized; no memory leaks.
+-- Notes: Uses workspace:GetServerTimeNow() for smooth, high-precision global synchronization.
+
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+
+-- 40 minutes total = 2400 seconds
+local CYCLE_DURATION_SECONDS = 40 * 60 
+local IN_GAME_HOURS = 24
+
+RunService.Heartbeat:Connect(function()
+	-- Get universal background time (runs even when server is empty)
+	local currentUnixTime = workspace:GetServerTimeNow()
+
+	-- Calculate our current position in the 40-minute cycle (returns a value from 0 to 0.999...)
+	local cycleRatio = (currentUnixTime % CYCLE_DURATION_SECONDS) / CYCLE_DURATION_SECONDS
+
+	-- Apply to the 24-hour Lighting clock
+	Lighting.ClockTime = cycleRatio * IN_GAME_HOURS
+end)
