@@ -315,10 +315,9 @@ local function updateEmptyIndicator(tierName, isEmpty)
 end
 
 -- ========= INVENTORY TRACKING =========
-local toolToCleanName = setmetatable({}, { __mode = "k" })
+local toolToCleanName = {}
 local counts = {}
 local sampleTool = {}
-local scannedTools = setmetatable({}, { __mode = "k" })
 
 local function normalizeToolName(toolName)
 	if not CarStats or not CarStats.Cars then return nil end
@@ -362,18 +361,7 @@ local function scanContainer(container)
 	if not container then return end
 	for _, child in ipairs(container:GetChildren()) do
 		if child:IsA("Tool") then
-			if not scannedTools[child] then
-				scannedTools[child] = true
-				adjustCount(child, 1)
-			end
-		end
-	end
-end
-
-local function pruneDeadSampleTools()
-	for cleanName, tool in pairs(sampleTool) do
-		if typeof(tool) ~= "Instance" or tool.Parent == nil or not tool:IsA("Tool") then
-			sampleTool[cleanName] = nil
+			adjustCount(child, 1)
 		end
 	end
 end
@@ -513,7 +501,6 @@ local function renderCurrentTab()
 	end
 
 	releaseAllButtons()
-	pruneDeadSampleTools()
 
 	local renderedAny = false
 	local char = player.Character
@@ -524,10 +511,6 @@ local function renderCurrentTab()
 			renderedAny = true
 
 			local tool = sampleTool[carName]
-			if tool and (tool.Parent == nil or not tool:IsA("Tool")) then
-				sampleTool[carName] = nil
-				tool = nil
-			end
 			local btn = getPooledButton()
 			activeButtons[carName] = btn
 
@@ -621,10 +604,8 @@ local function renderCurrentTab()
 				if not humanoid then return end
 
 				if moveTool.Parent == charNow then
-					-- 🛠️ CRITICAL FIX: Do NOT set Parent manually from client. Causes Engine Desync.
 					humanoid:UnequipTools()
 				else
-					-- 🛠️ FIX: Ensure we only equip one car at a time
 					humanoid:UnequipTools()
 					humanoid:EquipTool(moveTool)
 				end
@@ -659,27 +640,21 @@ local bpConnections = {} -- track connections to disconnect later
 
 local function bindContainer(container)
 	local conns = {}
-	
+
 	table.insert(conns, container.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
-			if not scannedTools[child] then
-				scannedTools[child] = true
-				adjustCount(child, 1)
-				scheduleRender()
-			end
+			adjustCount(child, 1)
+			scheduleRender()
 		end
 	end))
 
 	table.insert(conns, container.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
-			if scannedTools[child] then
-				scannedTools[child] = nil
-				adjustCount(child, -1)
-				scheduleRender()
-			end
+			adjustCount(child, -1)
+			scheduleRender()
 		end
 	end))
-	
+
 	return conns
 end
 
@@ -693,13 +668,10 @@ local function onCharacter(char)
 
 	-- When char dies, clean up char connections
 	local deathConn
-	local humanoid = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
-	if humanoid then
-		deathConn = humanoid.Died:Connect(function()
-			for _, c in ipairs(charConnections) do c:Disconnect() end
-			if deathConn then deathConn:Disconnect() end
-		end)
-	end
+	deathConn = char:WaitForChild("Humanoid").Died:Connect(function()
+		for _, c in ipairs(charConnections) do c:Disconnect() end
+		if deathConn then deathConn:Disconnect() end
+	end)
 
 	scheduleRender()
 end
@@ -707,10 +679,9 @@ end
 -- Handle Respawn Logic
 player.CharacterAdded:Connect(function(char)
 	-- 1. Reset Data
-	toolToCleanName = setmetatable({}, { __mode = "k" })
+	toolToCleanName = {}
 	counts = {}
 	sampleTool = {}
-	scannedTools = setmetatable({}, { __mode = "k" })
 
 	-- 2. Switch to NEW Backpack
 	currentBackpack = player:WaitForChild("Backpack")
@@ -720,15 +691,11 @@ player.CharacterAdded:Connect(function(char)
 
 	-- Bind new backpack
 	bpConnections = bindContainer(currentBackpack)
-
-	-- Allow server-side respawn repopulation to settle before scanning/rendering
-	task.wait(0.1)
 	scanContainer(currentBackpack)
 
 	-- 3. Handle Character
 	task.defer(function()
 		scanContainer(char)
-		pruneDeadSampleTools()
 		onCharacter(char)
 		scheduleRender()
 	end)
@@ -757,8 +724,12 @@ local function performClose()
 		fade:Play()
 		fade.Completed:Connect(function()
 			shopMusic:Stop()
-			shopMusic.Volume = 0.5
-			if gameThemeSound then gameThemeSound:Resume() end
+
+			-- Only resume normal audio if the global mute flag is not set
+			if SoundService:GetAttribute("MusicMuted") ~= true then
+				shopMusic.Volume = 0.5
+				if gameThemeSound then gameThemeSound:Resume() end
+			end
 		end)
 	end
 end
@@ -775,9 +746,13 @@ openButton.MouseButton1Click:Connect(function()
 	isOpen = true
 
 	if gameThemeSound and gameThemeSound.IsPlaying then gameThemeSound:Pause() end
-	if not shopMusic.IsPlaying then
-		shopMusic.Volume = 0.5
-		shopMusic:Play()
+
+	-- Only start shop music if the global mute flag is not set
+	if SoundService:GetAttribute("MusicMuted") ~= true then
+		if not shopMusic.IsPlaying then
+			shopMusic.Volume = 0.5
+			shopMusic:Play()
+		end
 	end
 
 	toggleOtherGuis(true)
