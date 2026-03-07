@@ -141,6 +141,9 @@ local function setMusicMuted(shouldBeMuted)
 	btnMusicOn.Visible = not shouldBeMuted
 	btnMusicOff.Visible = shouldBeMuted
 
+	-- Set the global mute flag for other scripts to read
+	SoundService:SetAttribute("MusicMuted", shouldBeMuted)
+
 	local vol = shouldBeMuted and 0 or CONFIG.DefaultVolume
 	if gameTheme then gameTheme.Volume = vol end
 
